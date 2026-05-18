@@ -286,3 +286,53 @@ OfferPath is built around one principle:
 > Do not just help users look stronger on paper. Help them become stronger in reality.
 
 That is the real value of the project, and that is what keeps the idea meaningful.
+
+---
+
+## 13. Local development
+
+The repository currently contains the Week 1 backend MVP:
+
+- FastAPI application
+- local SQLite persistence
+- user registration and login
+- authenticated resume upload
+- JD submission
+- analysis job creation
+- background mock analysis
+- job status and result API
+
+### Run the backend locally
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+Open the API docs at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### Run tests
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest
+```
+
+### Week 1 API flow
+
+1. `POST /auth/register`
+2. `POST /auth/login`
+3. `POST /resumes`
+4. `POST /jobs`
+5. `GET /jobs/{job_id}`
+
+The analysis logic is intentionally mocked in Week 1 so the full product flow works locally before adding real queue, cloud storage, and AI provider integrations.
