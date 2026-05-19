@@ -205,7 +205,7 @@ This project is designed to support discussion around:
 
 ---
 
-## 9. Five-week development strategy
+## 9. Six-week development strategy
 
 ### Week 1 — Define and build the base system
 
@@ -240,16 +240,7 @@ This project is designed to support discussion around:
 - document local, Docker, and production-like environment variables
 - keep AWS deployment-ready boundaries for S3 / RDS / SQS without requiring cloud setup yet
 
-### Week 4 — CI/CD, testing, and polishing
-
-- add GitHub Actions
-- add basic automated tests
-- add deployment automation
-- perform simple load testing
-- refine architecture explanation
-- prepare resume bullet points and demo flow
-
-### Week 5 — Agentic AI workflow
+### Week 4 — Local Agentic AI workflow
 
 - replace mock analysis with a pluggable AI provider interface
 - keep the mock provider available for local testing and CI
@@ -265,6 +256,29 @@ This project is designed to support discussion around:
 - add prompt and workflow version tracking
 - add retry and failure handling for model calls
 - keep the agentic behavior grounded in job state, stored results, and explainable intermediate steps
+
+### Week 5 — Testing and CI/CD
+
+- expand automated tests for auth, uploads, jobs, worker processing, health checks, and AI workflow validation
+- add GitHub Actions for test execution
+- add Docker build checks for API and worker images
+- add Docker Compose configuration validation
+- perform simple local load testing against key endpoints
+- refine README, architecture explanation, and demo flow
+- prepare resume bullet points and interview talking points
+
+### Week 6 — AWS deployment
+
+- deploy the API and worker first on EC2 using Docker Compose
+- configure environment variables and secrets for the EC2 deployment
+- run PostgreSQL and Redis in the initial Compose-based EC2 setup if managed services are not ready
+- prepare migration path from local containers to AWS managed services:
+  - PostgreSQL container -> Amazon RDS
+  - local resume storage -> Amazon S3
+  - database-backed queue simulation -> Amazon SQS
+  - Redis container -> Amazon ElastiCache
+- add production deployment notes for logs, ports, HTTPS, Nginx, and domain/SSL
+- document rollback and operational checks for the demo deployment
 
 ---
 
