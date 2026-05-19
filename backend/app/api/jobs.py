@@ -1,28 +1,24 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.db import SessionLocal, get_db
+from app.core.logging import get_logger, log_event
+from app.db import get_db
 from app.models import AnalysisJob, Resume, User
 from app.schemas import JobCreate, JobDetail, JobRead
-from app.services.analysis import parse_result, run_mock_analysis
+from app.services.analysis import parse_result
+from app.services.queue import enqueue_analysis_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-
-
-def process_job_in_background(job_id: int) -> None:
-    db = SessionLocal()
-    try:
-        run_mock_analysis(db, job_id)
-    finally:
-        db.close()
+logger = get_logger(__name__)
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
 def create_job(
     payload: JobCreate,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> AnalysisJob:
@@ -42,11 +38,17 @@ def create_job(
         job_description=payload.job_description,
     )
     db.add(job)
-    db.commit()
-    db.refresh(job)
-
-    background_tasks.add_task(process_job_in_background, job.id)
-    return job
+    queued_job = enqueue_analysis_job(db, job)
+    log_event(
+        logger,
+        logging.INFO,
+        "analysis_job.enqueued",
+        job_id=queued_job.id,
+        user_id=current_user.id,
+        resume_id=resume.id,
+        status=queued_job.status.value,
+    )
+    return queued_job
 
 
 @router.get("", response_model=list[JobRead])
@@ -77,8 +79,13 @@ def get_job(
         resume_id=job.resume_id,
         target_title=job.target_title,
         status=job.status,
+        attempt_count=job.attempt_count,
+        max_attempts=job.max_attempts,
         created_at=job.created_at,
         updated_at=job.updated_at,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
         result=parse_result(job),
         error_message=job.error_message,
+        last_error=job.last_error,
     )

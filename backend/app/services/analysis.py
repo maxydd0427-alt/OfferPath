@@ -1,10 +1,14 @@
 import json
+import logging
 import re
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import AnalysisJob, JobStatus
+from app.core.logging import get_logger, log_event
+from app.models import AnalysisJob, JobStatus, utc_now
+
+logger = get_logger(__name__)
 
 SKILL_KEYWORDS = {
     "python",
@@ -37,12 +41,26 @@ def extract_skills(text: str) -> list[str]:
 def run_mock_analysis(db: Session, job_id: int) -> None:
     job = db.get(AnalysisJob, job_id)
     if job is None:
+        log_event(logger, logging.WARNING, "analysis_job.not_found", job_id=job_id)
         return
 
     try:
         job.status = JobStatus.processing
+        job.attempt_count += 1
+        job.started_at = utc_now()
+        job.finished_at = None
+        job.last_error = None
+        job.error_message = None
         db.commit()
         db.refresh(job)
+        log_event(
+            logger,
+            logging.INFO,
+            "analysis_job.started",
+            job_id=job.id,
+            attempt_count=job.attempt_count,
+            status=job.status.value,
+        )
 
         resume_text = _read_resume_text(job.resume.stored_path)
         resume_skills = extract_skills(resume_text)
@@ -62,9 +80,32 @@ def run_mock_analysis(db: Session, job_id: int) -> None:
         job.result_json = json.dumps(result)
         job.status = JobStatus.succeeded
         job.error_message = None
+        job.last_error = None
+        job.finished_at = utc_now()
+        log_event(
+            logger,
+            logging.INFO,
+            "analysis_job.succeeded",
+            job_id=job.id,
+            attempt_count=job.attempt_count,
+            missing_skill_count=len(missing_skills),
+            status=job.status.value,
+        )
     except Exception as exc:  # pragma: no cover - defensive failure visibility
+        error = str(exc)
         job.status = JobStatus.failed
-        job.error_message = str(exc)
+        job.error_message = error
+        job.last_error = error
+        job.finished_at = utc_now()
+        log_event(
+            logger,
+            logging.ERROR,
+            "analysis_job.failed",
+            job_id=job.id,
+            attempt_count=job.attempt_count,
+            error=error,
+            status=job.status.value,
+        )
     finally:
         db.commit()
 

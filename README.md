@@ -205,7 +205,7 @@ This project is designed to support discussion around:
 
 ---
 
-## 9. Four-week development strategy
+## 9. Five-week development strategy
 
 ### Week 1 — Define and build the base system
 
@@ -232,12 +232,13 @@ This project is designed to support discussion around:
 
 ### Week 3 — Engineering and AWS deployment
 
-- add Redis
-- add idempotency and simple rate limiting
-- dockerize services
-- deploy backend and worker to AWS
-- connect S3 / RDS / SQS
-- add logging and environment separation
+- dockerize API and worker services
+- add Docker Compose for local API / worker / PostgreSQL / Redis
+- make configuration work across local SQLite, Docker PostgreSQL, and future AWS RDS
+- add Redis connectivity as the foundation for idempotency, rate limiting, and job locks
+- add structured logging for API and worker execution
+- document local, Docker, and production-like environment variables
+- keep AWS deployment-ready boundaries for S3 / RDS / SQS without requiring cloud setup yet
 
 ### Week 4 — CI/CD, testing, and polishing
 
@@ -247,6 +248,23 @@ This project is designed to support discussion around:
 - perform simple load testing
 - refine architecture explanation
 - prepare resume bullet points and demo flow
+
+### Week 5 — Agentic AI workflow
+
+- replace mock analysis with a pluggable AI provider interface
+- keep the mock provider available for local testing and CI
+- split analysis into a multi-step workflow:
+  - resume understanding
+  - JD understanding
+  - skill gap comparison
+  - roadmap generation
+  - project recommendation
+  - interview preparation
+- require structured JSON output from the AI workflow
+- validate AI results before storing them
+- add prompt and workflow version tracking
+- add retry and failure handling for model calls
+- keep the agentic behavior grounded in job state, stored results, and explainable intermediate steps
 
 ---
 
@@ -291,7 +309,7 @@ That is the real value of the project, and that is what keeps the idea meaningfu
 
 ## 13. Local development
 
-The repository currently contains the Week 1 backend MVP:
+The repository currently contains the backend MVP:
 
 - FastAPI application
 - local SQLite persistence
@@ -299,8 +317,9 @@ The repository currently contains the Week 1 backend MVP:
 - authenticated resume upload
 - JD submission
 - analysis job creation
-- background mock analysis
+- worker-based mock analysis
 - job status and result API
+- job attempt tracking and worker timing fields
 
 ### Run the backend locally
 
@@ -327,6 +346,171 @@ source .venv/bin/activate
 pytest
 ```
 
+### Run the local worker
+
+Week 2 introduces a worker entrypoint. The API creates queued jobs, and the
+worker processes them:
+
+```bash
+cd backend
+source .venv/bin/activate
+python -m worker.main --once
+```
+
+### Run with Docker Compose
+
+Week 3 adds a Docker Compose setup for local production-like services:
+
+```bash
+docker compose up --build
+```
+
+This starts:
+
+- FastAPI API on `http://127.0.0.1:8000`
+- worker service
+- PostgreSQL on port `5432`
+- Redis on port `6379`
+
+The Docker environment uses:
+
+```text
+backend/.env.docker.example
+```
+
+The API docs are still available at:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+### Environment profiles
+
+OfferPath currently supports three environment shapes:
+
+| Environment | Database | Redis | Typical command |
+| --- | --- | --- | --- |
+| Local development | SQLite file | Local Redis URL configured but not required yet | `uvicorn app.main:app --reload` |
+| Docker development | PostgreSQL container | Redis container | `docker compose up --build` |
+| Production-like AWS | RDS PostgreSQL | ElastiCache Redis | future deployment step |
+
+The active database is controlled by:
+
+```text
+OFFERPATH_DATABASE_URL
+```
+
+Local default:
+
+```text
+sqlite:///./offerpath.db
+```
+
+Docker default:
+
+```text
+postgresql+psycopg://offerpath:offerpath@postgres:5432/offerpath
+```
+
+Redis is configured through:
+
+```text
+OFFERPATH_REDIS_URL
+```
+
+Redis is included in Docker Compose. The application uses Redis through a small client wrapper that currently supports:
+
+- readiness checks
+- simple lock acquisition with TTL
+- lock release
+
+These are the building blocks for idempotency, rate limiting, and job locks.
+
+Readiness endpoint:
+
+```text
+GET /health/ready
+```
+
+### Logging
+
+API and worker logs are emitted through Python logging with JSON event payloads. The log level is controlled by:
+
+```text
+OFFERPATH_LOG_LEVEL
+```
+
+Example worker log event:
+
+```json
+{"env": "docker", "event": "analysis_job.succeeded", "attempt_count": 1, "job_id": 42, "missing_skill_count": 5, "status": "succeeded"}
+```
+
+Important event names include:
+
+- `api.startup`
+- `api.shutdown`
+- `analysis_job.enqueued`
+- `worker.started`
+- `worker.job_claimed`
+- `analysis_job.started`
+- `analysis_job.succeeded`
+- `analysis_job.failed`
+
+### Week 3 verification checklist
+
+Run the local test suite:
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest
+```
+
+Validate the Docker Compose file:
+
+```bash
+docker compose config --quiet
+```
+
+Start the production-like local stack:
+
+```bash
+docker compose up --build
+```
+
+Check the API:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Check readiness:
+
+```text
+GET http://127.0.0.1:8000/health/ready
+```
+
+Expected Docker readiness:
+
+```json
+{
+  "status": "ok",
+  "database": "ok",
+  "redis": "ok"
+}
+```
+
+Expected local readiness without Redis running:
+
+```json
+{
+  "status": "ok",
+  "database": "ok",
+  "redis": "unavailable"
+}
+```
+
 ### Week 1 API flow
 
 1. `POST /auth/register`
@@ -334,5 +518,7 @@ pytest
 3. `POST /resumes`
 4. `POST /jobs`
 5. `GET /jobs/{job_id}`
+6. `python -m worker.main --once`
+7. `GET /jobs/{job_id}`
 
-The analysis logic is intentionally mocked in Week 1 so the full product flow works locally before adding real queue, cloud storage, and AI provider integrations.
+The analysis logic is intentionally mocked so the full product flow works locally before adding real cloud queue, cloud storage, and AI provider integrations.

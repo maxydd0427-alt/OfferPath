@@ -44,8 +44,12 @@ class JobRead(BaseModel):
     resume_id: int
     target_title: str
     status: JobStatus
+    attempt_count: int
+    max_attempts: int
     created_at: datetime
     updated_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -53,3 +57,4 @@ class JobRead(BaseModel):
 class JobDetail(JobRead):
     result: dict[str, Any] | None = None
     error_message: str | None = None
+    last_error: str | None = None
