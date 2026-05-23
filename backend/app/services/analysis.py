@@ -4,7 +4,6 @@ import re
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -13,6 +12,9 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
 from app.models import AnalysisJob, JobStatus, utc_now
+from app.services.analysis_prompts import build_gemini_prompt
+from app.services.resume_parser import extract_resume_text
+from app.services.storage import get_storage_service
 
 logger = get_logger(__name__)
 
@@ -241,7 +243,13 @@ def run_analysis(db: Session, job_id: int) -> None:
             status=job.status.value,
         )
 
-        resume_text = _read_resume_text(job.resume.stored_path)
+        storage = get_storage_service()
+        file_bytes = storage.read_file(job.resume.stored_path)
+        resume_text = extract_resume_text(
+            file_bytes=file_bytes,
+            filename=job.resume.original_filename,
+            content_type=job.resume.content_type,
+        )
         output = provider.run(
             target_title=job.target_title,
             resume_text=resume_text,
@@ -296,40 +304,6 @@ def get_analysis_provider() -> AnalysisProvider:
         return MockAnalysisProvider()
     raise RuntimeError(f"Unsupported AI provider: {settings.ai_provider}")
 
-
-def build_gemini_prompt(target_title: str, resume_text: str, job_description: str) -> str:
-    return f"""
-You are the analysis workflow for OfferPath.
-Return only valid JSON matching this exact schema:
-{{
-  "resume_skills": ["string"],
-  "target_role_skills": ["string"],
-  "missing_skills": ["string"],
-  "summary": "string",
-  "roadmap": [{{"priority": "P1", "skill": "string", "task": "string"}}],
-  "project_suggestions": ["string"],
-  "interview_questions": ["string"]
-}}
-
-Workflow:
-1. Understand the resume.
-2. Understand the job description.
-3. Compare skill gaps.
-4. Generate a prioritized roadmap.
-5. Suggest proof-oriented projects.
-6. Generate interview preparation questions.
-
-Target title:
-{target_title}
-
-Resume:
-{resume_text}
-
-Job description:
-{job_description}
-""".strip()
-
-
 def _mark_job_failed(job: AnalysisJob, exc: Exception) -> None:
     error = str(exc)
     job.status = JobStatus.failed
@@ -345,14 +319,6 @@ def _mark_job_failed(job: AnalysisJob, exc: Exception) -> None:
         error=error,
         status=job.status.value,
     )
-
-
-def _read_resume_text(path: str) -> str:
-    resume_path = Path(path)
-    if resume_path.suffix.lower() not in {".txt", ".md", ".csv"}:
-        return resume_path.name
-    return resume_path.read_text(encoding="utf-8", errors="ignore")
-
 
 def build_summary(target_title: str, missing_skills: list[str]) -> str:
     if not missing_skills:

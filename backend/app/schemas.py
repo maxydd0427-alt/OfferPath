@@ -27,7 +27,9 @@ class Token(BaseModel):
 class ResumeRead(BaseModel):
     id: int
     original_filename: str
+    storage_backend: str
     content_type: str | None
+    file_size: int
     created_at: datetime
 
     model_config = {"from_attributes": True}

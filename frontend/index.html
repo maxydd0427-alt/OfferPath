@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OfferPath Test Console</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Status">
+        <div>
+          <p class="eyebrow">OfferPath</p>
+          <h1>Test Console</h1>
+        </div>
+        <div class="status-strip">
+          <label>
+            API
+            <input id="apiBase" value="http://127.0.0.1:8001" />
+          </label>
+          <button id="checkHealth" type="button">Check</button>
+          <span id="healthBadge" class="badge">unknown</span>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="panel">
+          <h2>Session</h2>
+          <form id="authForm" class="stack">
+            <label>Email<input id="email" type="email" value="max@example.com" required /></label>
+            <label>Password<input id="password" type="password" value="strong-password" required /></label>
+            <div class="actions">
+              <button id="registerBtn" type="button">Register</button>
+              <button id="loginBtn" type="submit">Login</button>
+            </div>
+          </form>
+          <dl class="meta">
+            <div><dt>Token</dt><dd id="tokenState">not logged in</dd></div>
+            <div><dt>Resume</dt><dd id="resumeState">none</dd></div>
+            <div><dt>Job</dt><dd id="jobState">none</dd></div>
+          </dl>
+        </aside>
+
+        <section class="panel main-panel">
+          <div class="tabs" role="tablist" aria-label="Workflow">
+            <button class="tab active" data-tab="resume" type="button">Resume</button>
+            <button class="tab" data-tab="job" type="button">Job</button>
+            <button class="tab" data-tab="result" type="button">Result</button>
+          </div>
+
+          <div id="resumeTab" class="tab-panel">
+            <h2>Upload Resume</h2>
+            <form id="resumeForm" class="stack">
+              <label>Resume file<input id="resumeFile" type="file" accept=".txt,.md,.csv,.pdf,.doc,.docx" required /></label>
+              <button type="submit">Upload</button>
+            </form>
+            <div id="resumeList" class="list"></div>
+          </div>
+
+          <div id="jobTab" class="tab-panel hidden">
+            <h2>Create Analysis Job</h2>
+            <form id="jobForm" class="stack">
+              <label>Resume ID<input id="resumeId" type="number" min="1" required /></label>
+              <label>Target title<input id="targetTitle" value="Backend Engineer" required /></label>
+              <label>
+                Job description
+                <textarea id="jobDescription" rows="8" required>We need Python, FastAPI, PostgreSQL, Redis, AWS, SQS, S3, Docker, testing, and REST APIs.</textarea>
+              </label>
+              <button type="submit">Create Job</button>
+            </form>
+          </div>
+
+          <div id="resultTab" class="tab-panel hidden">
+            <div class="result-head">
+              <h2>Job Result</h2>
+              <div class="actions">
+                <button id="refreshJob" type="button">Refresh</button>
+                <button id="pollJob" type="button">Poll</button>
+              </div>
+            </div>
+            <p class="hint">Run the worker in another terminal after creating a job: <code>PYTHONPATH=. python -m worker.main --once</code></p>
+            <div id="jobSummary" class="summary-grid"></div>
+            <pre id="resultJson" class="json-output">{}</pre>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

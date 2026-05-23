@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 os.environ["OFFERPATH_DATABASE_URL"] = "sqlite:///./test_offerpath.db"
 os.environ["OFFERPATH_UPLOAD_DIR"] = "./test_storage/resumes"
+os.environ["STORAGE_BACKEND"] = "local"
 Path("test_offerpath.db").unlink(missing_ok=True)
 
 from app.db import SessionLocal, init_db
@@ -49,7 +50,10 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
                 files={"file": ("resume.txt", file, "text/plain")},
             )
         assert response.status_code == 201
-        resume_id = response.json()["id"]
+        resume_payload = response.json()
+        resume_id = resume_payload["id"]
+        assert resume_payload["storage_backend"] == "local"
+        assert resume_payload["file_size"] > 0
 
         response = client.post(
             "/jobs",
@@ -113,7 +117,9 @@ def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
             owner_id=user.id,
             original_filename="resume.txt",
             stored_path=str(resume_file),
+            storage_backend="local",
             content_type="text/plain",
+            file_size=resume_file.stat().st_size,
         )
         db.add(resume)
         db.commit()

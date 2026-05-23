@@ -107,7 +107,7 @@ This project is intentionally designed to cover both **AI/agent trends** and **r
 - job state machine
 - PostgreSQL schema design
 - Redis for caching / idempotency / rate limiting
-- S3 object storage
+- S3-backed resume object storage
 - Dockerized services
 - CI/CD pipeline
 - AWS deployment
@@ -461,6 +461,56 @@ The Week 4 analysis workflow records:
 - prompt version
 - intermediate steps
 - validated structured result JSON
+
+### S3-backed resume storage
+
+Resume files are stored outside the database. The upload API sends the original
+PDF/TXT bytes to S3 through the storage service, then stores only metadata in
+PostgreSQL/SQLite:
+
+- original filename
+- storage backend
+- S3 key in `stored_path`
+- content type
+- file size
+- owner and timestamps
+
+Storage is configured through:
+
+```text
+STORAGE_BACKEND=s3
+AWS_REGION=ap-southeast-2
+S3_BUCKET_NAME=your-bucket-name
+S3_RESUME_PREFIX=resumes
+```
+
+For local personal AWS credentials, the app also supports:
+
+```text
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+```
+
+Production deployments should prefer EC2/ECS IAM roles rather than committed or
+hard-coded credentials. Tests use the local storage backend and do not require a
+real AWS bucket.
+
+The worker analysis flow is now:
+
+```text
+AnalysisJob.resume.stored_path
+-> S3StorageService.read_file()
+-> ResumeParser.extract_resume_text()
+-> mock/Gemini provider.run(resume_text, job_description)
+-> Pydantic validation
+-> result_json / intermediate_json saved in the database
+```
+
+The parser supports `.txt` and `.pdf` resumes. Gemini and mock providers still
+receive plain `resume_text`; they do not read S3 keys or parse PDFs directly.
+This keeps the design ready for future agent tools such as
+`read_resume_tool(job_id)`, while intentionally avoiding skills, MCP, or
+multi-agent architecture in this version.
 
 Readiness endpoint:
 

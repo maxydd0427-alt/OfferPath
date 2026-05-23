@@ -37,7 +37,9 @@ class Resume(Base):
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     original_filename: Mapped[str]
     stored_path: Mapped[str]
+    storage_backend: Mapped[str] = mapped_column(default="s3")
     content_type: Mapped[str | None]
+    file_size: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=utc_now)
 
     owner: Mapped[User] = relationship(back_populates="resumes")
