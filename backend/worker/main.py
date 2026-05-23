@@ -24,8 +24,9 @@ def process_next_queued_job(db: Session) -> int | None:
 
     job_id = job.id
     log_event(logger, logging.INFO, "worker.job_claimed", job_id=job_id)
-    run_analysis(db, job_id)
-    return job_id
+    if run_analysis(db, job_id):
+        return job_id
+    return None
 
 
 def run_worker(poll_interval_seconds: float, once: bool) -> None:

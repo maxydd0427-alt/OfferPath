@@ -1,6 +1,8 @@
 import json
 import logging
+import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from abc import ABC, abstractmethod
@@ -13,6 +15,8 @@ from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
 from app.models import AnalysisJob, JobStatus, utc_now
 from app.services.analysis_prompts import build_gemini_prompt
+from app.services.job_status_cache import set_job_status
+from app.services.redis_lock import acquire_lock, release_lock
 from app.services.resume_parser import extract_resume_text
 from app.services.storage import get_storage_service
 
@@ -213,14 +217,24 @@ def compare_skill_gap(resume: Understanding, job_description: Understanding) -> 
     )
 
 
-def run_analysis(db: Session, job_id: int) -> None:
-    job = db.get(AnalysisJob, job_id)
-    if job is None:
-        log_event(logger, logging.WARNING, "analysis_job.not_found", job_id=job_id)
-        return
+def run_analysis(db: Session, job_id: int) -> bool:
+    lock_key = f"lock:analysis_job:{job_id}"
+    lock_owner = f"worker:{socket.gethostname()}:{os.getpid()}"
+    if not acquire_lock(lock_key, owner=lock_owner, ttl_seconds=300):
+        log_event(logger, logging.WARNING, "analysis_job.lock_not_acquired", job_id=job_id)
+        return False
 
-    provider = get_analysis_provider()
+    job: AnalysisJob | None = None
     try:
+        job = db.get(AnalysisJob, job_id)
+        if job is None:
+            log_event(logger, logging.WARNING, "analysis_job.not_found", job_id=job_id)
+            return False
+        if job.status == JobStatus.succeeded:
+            log_event(logger, logging.INFO, "analysis_job.already_succeeded", job_id=job_id)
+            return False
+
+        provider = get_analysis_provider()
         job.status = JobStatus.processing
         job.attempt_count += 1
         job.started_at = utc_now()
@@ -232,6 +246,13 @@ def run_analysis(db: Session, job_id: int) -> None:
         job.prompt_version = provider.prompt_version
         db.commit()
         db.refresh(job)
+        set_job_status(
+            job.id,
+            status=job.status.value,
+            step="started",
+            progress=5,
+            message="Analysis worker started.",
+        )
         log_event(
             logger,
             logging.INFO,
@@ -243,12 +264,33 @@ def run_analysis(db: Session, job_id: int) -> None:
             status=job.status.value,
         )
 
+        set_job_status(
+            job.id,
+            status=job.status.value,
+            step="reading_resume_from_s3",
+            progress=20,
+            message="Reading resume bytes from storage.",
+        )
         storage = get_storage_service()
         file_bytes = storage.read_file(job.resume.stored_path)
+        set_job_status(
+            job.id,
+            status=job.status.value,
+            step="parsing_resume",
+            progress=35,
+            message="Extracting resume text.",
+        )
         resume_text = extract_resume_text(
             file_bytes=file_bytes,
             filename=job.resume.original_filename,
             content_type=job.resume.content_type,
+        )
+        set_job_status(
+            job.id,
+            status=job.status.value,
+            step="running_analysis_provider",
+            progress=60,
+            message=f"Running {provider.name} analysis provider.",
         )
         output = provider.run(
             target_title=job.target_title,
@@ -256,6 +298,13 @@ def run_analysis(db: Session, job_id: int) -> None:
             job_description=job.job_description,
         )
 
+        set_job_status(
+            job.id,
+            status=job.status.value,
+            step="saving_result",
+            progress=90,
+            message="Saving analysis result.",
+        )
         job.result_json = json.dumps(output.result.model_dump())
         job.intermediate_json = json.dumps(output.intermediate_steps)
         job.ai_provider = output.ai_provider
@@ -265,6 +314,13 @@ def run_analysis(db: Session, job_id: int) -> None:
         job.error_message = None
         job.last_error = None
         job.finished_at = utc_now()
+        set_job_status(
+            job.id,
+            status=job.status.value,
+            step="completed",
+            progress=100,
+            message="Analysis completed.",
+        )
         log_event(
             logger,
             logging.INFO,
@@ -276,16 +332,25 @@ def run_analysis(db: Session, job_id: int) -> None:
             missing_skill_count=len(output.result.missing_skills),
             status=job.status.value,
         )
+        return True
     except (ValidationError, json.JSONDecodeError, RuntimeError) as exc:
-        _mark_job_failed(job, exc)
+        if job is not None:
+            _mark_job_failed(job, exc)
+        else:
+            log_event(logger, logging.ERROR, "analysis_job.failed_before_load", job_id=job_id, error=str(exc))
     except Exception as exc:  # pragma: no cover - defensive failure visibility
-        _mark_job_failed(job, exc)
+        if job is not None:
+            _mark_job_failed(job, exc)
+        else:
+            log_event(logger, logging.ERROR, "analysis_job.failed_before_load", job_id=job_id, error=str(exc))
     finally:
         db.commit()
+        release_lock(lock_key, owner=lock_owner)
+    return False
 
 
-def run_mock_analysis(db: Session, job_id: int) -> None:
-    run_analysis(db, job_id)
+def run_mock_analysis(db: Session, job_id: int) -> bool:
+    return run_analysis(db, job_id)
 
 
 def parse_result(job: AnalysisJob, field: str = "result_json") -> dict | None:
@@ -310,6 +375,13 @@ def _mark_job_failed(job: AnalysisJob, exc: Exception) -> None:
     job.error_message = error
     job.last_error = error
     job.finished_at = utc_now()
+    set_job_status(
+        job.id,
+        status=job.status.value,
+        step="failed",
+        progress=None,
+        message=error,
+    )
     log_event(
         logger,
         logging.ERROR,

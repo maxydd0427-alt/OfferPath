@@ -57,7 +57,7 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
 
         response = client.post(
             "/jobs",
-            headers=headers,
+            headers={**headers, "Idempotency-Key": "test-key-123"},
             json={
                 "resume_id": resume_id,
                 "target_title": "Backend Engineer",
@@ -70,11 +70,24 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
         assert response.json()["attempt_count"] == 0
         assert response.json()["max_attempts"] == 3
 
+        response = client.post(
+            "/jobs",
+            headers={**headers, "Idempotency-Key": "test-key-123"},
+            json={
+                "resume_id": resume_id,
+                "target_title": "Backend Engineer",
+                "job_description": "We need Python, FastAPI, PostgreSQL, Redis, AWS, SQS, S3, Docker, testing, and REST APIs.",
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["id"] == job_id
+
         response = client.get(f"/jobs/{job_id}", headers=headers)
         assert response.status_code == 200
         payload = response.json()
         assert payload["status"] == "queued"
         assert payload["result"] is None
+        assert payload["live_status"]["status"] == "queued"
         assert payload["started_at"] is None
         assert payload["finished_at"] is None
 
@@ -98,6 +111,8 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
         assert payload["prompt_version"] == "mock-v1"
         assert payload["intermediate_steps"]["resume_understanding"]["skills"]
         assert "skill_gap_comparison" in payload["intermediate_steps"]
+        assert payload["live_status"]["status"] == "succeeded"
+        assert payload["live_status"]["progress"] == 100
         assert "redis" in payload["result"]["missing_skills"]
 
 

@@ -436,10 +436,59 @@ OFFERPATH_REDIS_URL
 Redis is included in Docker Compose. The application uses Redis through a small client wrapper that currently supports:
 
 - readiness checks
-- simple lock acquisition with TTL
-- lock release
+- rate limiting for AI analysis job creation
+- idempotency keys for `POST /jobs`
+- live job status/progress cache
+- owner-safe distributed locks for worker execution
 
-These are the building blocks for idempotency, rate limiting, and job locks.
+Redis is temporary operational storage only. PostgreSQL/SQLite remains the
+source of truth for users, resumes, job state, `result_json`,
+`intermediate_json`, and metadata.
+
+Redis-backed reliability features:
+
+- rate limiting protects AI provider cost from repeated job creation
+- `Idempotency-Key` prevents duplicate jobs when a client retries `POST /jobs`
+- live status cache exposes progress such as `parsing_resume` and
+  `running_analysis_provider`
+- distributed worker lock prevents duplicate execution when multiple workers
+  compete for the same analysis job
+
+Manual Redis test flow:
+
+```bash
+redis-server
+```
+
+Then start the API:
+
+```bash
+cd backend
+source .venv/bin/activate
+PYTHONPATH=. uvicorn app.main:app --reload
+```
+
+Create a job with:
+
+```text
+Idempotency-Key: test-key-123
+```
+
+Send the same `POST /jobs` request again with the same header. The response
+should return the same job id instead of creating a duplicate. Run the worker:
+
+```bash
+PYTHONPATH=. python -m worker.main --once
+```
+
+Then check:
+
+```text
+GET /jobs/{job_id}
+```
+
+The response keeps the existing fields and adds `live_status` when Redis has
+progress data.
 
 AI analysis is configured through:
 
