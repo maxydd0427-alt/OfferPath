@@ -56,6 +56,10 @@ class AnalysisJob(Base):
         Enum(JobStatus), default=JobStatus.queued, index=True
     )
     result_json: Mapped[str | None] = mapped_column(Text)
+    intermediate_json: Mapped[str | None] = mapped_column(Text)
+    ai_provider: Mapped[str] = mapped_column(default="mock")
+    workflow_version: Mapped[str] = mapped_column(default="agentic-v1")
+    prompt_version: Mapped[str] = mapped_column(default="mock-v1")
     error_message: Mapped[str | None] = mapped_column(Text)
     last_error: Mapped[str | None] = mapped_column(Text)
     attempt_count: Mapped[int] = mapped_column(default=0)

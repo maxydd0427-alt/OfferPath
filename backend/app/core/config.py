@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
     upload_dir: str = "./storage/resumes"
     redis_url: str = "redis://localhost:6379/0"
+    ai_provider: str = "mock"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-1.5-flash"
     log_level: str = "INFO"
 
     model_config = SettingsConfigDict(

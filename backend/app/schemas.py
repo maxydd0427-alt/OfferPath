@@ -56,5 +56,9 @@ class JobRead(BaseModel):
 
 class JobDetail(JobRead):
     result: dict[str, Any] | None = None
+    intermediate_steps: dict[str, Any] | None = None
+    ai_provider: str
+    workflow_version: str
+    prompt_version: str
     error_message: str | None = None
     last_error: str | None = None

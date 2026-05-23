@@ -89,6 +89,11 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
         assert payload["started_at"] is not None
         assert payload["finished_at"] is not None
         assert payload["last_error"] is None
+        assert payload["ai_provider"] == "mock"
+        assert payload["workflow_version"] == "agentic-v1"
+        assert payload["prompt_version"] == "mock-v1"
+        assert payload["intermediate_steps"]["resume_understanding"]["skills"]
+        assert "skill_gap_comparison" in payload["intermediate_steps"]
         assert "redis" in payload["result"]["missing_skills"]
 
 
@@ -134,5 +139,9 @@ def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
         assert job.finished_at is not None
         assert job.last_error is None
         assert job.result_json is not None
+        assert job.intermediate_json is not None
+        assert job.ai_provider == "mock"
+        assert job.workflow_version == "agentic-v1"
+        assert job.prompt_version == "mock-v1"
     finally:
         db.close()

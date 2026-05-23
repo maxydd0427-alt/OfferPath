@@ -331,9 +331,10 @@ The repository currently contains the backend MVP:
 - authenticated resume upload
 - JD submission
 - analysis job creation
-- worker-based mock analysis
+- worker-based agentic analysis workflow with a mock provider
 - job status and result API
 - job attempt tracking and worker timing fields
+- workflow, prompt, provider, and intermediate-step tracking
 
 ### Run the backend locally
 
@@ -439,6 +440,27 @@ Redis is included in Docker Compose. The application uses Redis through a small 
 - lock release
 
 These are the building blocks for idempotency, rate limiting, and job locks.
+
+AI analysis is configured through:
+
+```text
+OFFERPATH_AI_PROVIDER
+OFFERPATH_GEMINI_MODEL
+OFFERPATH_GEMINI_API_KEY
+```
+
+The default provider is `mock`, which keeps local development and CI stable.
+Set `OFFERPATH_AI_PROVIDER=gemini` and provide `OFFERPATH_GEMINI_API_KEY` to
+call Gemini through the pluggable provider interface. Do not commit real API
+keys to `.env` examples or source control.
+
+The Week 4 analysis workflow records:
+
+- provider name
+- workflow version
+- prompt version
+- intermediate steps
+- validated structured result JSON
 
 Readiness endpoint:
 

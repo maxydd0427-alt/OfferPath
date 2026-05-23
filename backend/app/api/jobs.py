@@ -86,6 +86,10 @@ def get_job(
         started_at=job.started_at,
         finished_at=job.finished_at,
         result=parse_result(job),
+        intermediate_steps=parse_result(job, field="intermediate_json"),
+        ai_provider=job.ai_provider,
+        workflow_version=job.workflow_version,
+        prompt_version=job.prompt_version,
         error_message=job.error_message,
         last_error=job.last_error,
     )

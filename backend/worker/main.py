@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import configure_logging, get_logger, log_event
 from app.db import SessionLocal, init_db
 from app.models import AnalysisJob, JobStatus
-from app.services.analysis import run_mock_analysis
+from app.services.analysis import run_analysis
 
 logger = get_logger(__name__)
 
@@ -24,7 +24,7 @@ def process_next_queued_job(db: Session) -> int | None:
 
     job_id = job.id
     log_event(logger, logging.INFO, "worker.job_claimed", job_id=job_id)
-    run_mock_analysis(db, job_id)
+    run_analysis(db, job_id)
     return job_id
 
 

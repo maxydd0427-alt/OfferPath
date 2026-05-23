@@ -47,6 +47,10 @@ def _apply_sqlite_dev_migrations() -> None:
         "max_attempts": "ALTER TABLE analysis_jobs ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3",
         "started_at": "ALTER TABLE analysis_jobs ADD COLUMN started_at DATETIME",
         "finished_at": "ALTER TABLE analysis_jobs ADD COLUMN finished_at DATETIME",
+        "intermediate_json": "ALTER TABLE analysis_jobs ADD COLUMN intermediate_json TEXT",
+        "ai_provider": "ALTER TABLE analysis_jobs ADD COLUMN ai_provider VARCHAR NOT NULL DEFAULT 'mock'",
+        "workflow_version": "ALTER TABLE analysis_jobs ADD COLUMN workflow_version VARCHAR NOT NULL DEFAULT 'agentic-v1'",
+        "prompt_version": "ALTER TABLE analysis_jobs ADD COLUMN prompt_version VARCHAR NOT NULL DEFAULT 'mock-v1'",
     }
 
     with engine.begin() as connection:
