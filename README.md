@@ -596,7 +596,7 @@ To use Gemini for real AI output, set these values in your local
 
 ```text
 OFFERPATH_AI_PROVIDER=gemini
-OFFERPATH_GEMINI_MODEL=gemini-1.5-flash
+OFFERPATH_GEMINI_MODEL=gemini-2.5-flash
 OFFERPATH_GEMINI_API_KEY=your-local-secret
 ```
 
@@ -652,8 +652,58 @@ AnalysisJob.resume.stored_path
 The parser supports `.txt` and `.pdf` resumes. Gemini and mock providers still
 receive plain `resume_text`; they do not read S3 keys or parse PDFs directly.
 This keeps the design ready for future agent tools such as
-`read_resume_tool(job_id)`, while intentionally avoiding skills, MCP, or
-multi-agent architecture in this version.
+`read_resume_tool(job_id)` while keeping the production path simple.
+
+### Experimental LangChain/LangGraph preview
+
+The default OfferPath workflow is still provider-based and production-oriented:
+
+```text
+worker -> get_analysis_provider() -> mock/Gemini provider -> result_json
+```
+
+That path is the only workflow used by `POST /jobs` and the worker by default.
+It validates `AnalysisResult` and saves `result_json` / `intermediate_json`.
+
+An isolated experimental preview lives under:
+
+```text
+backend/app/services/agent_experimental/
+```
+
+Its entrypoint is:
+
+```python
+run_langchain_analysis_preview(db, job_id)
+```
+
+The preview compares tool-calling and context reuse ideas without changing the
+database schema and without overwriting production `result_json` by default. It
+shares the existing `AnalysisJob`, `Resume`, `AnalysisResult`, and
+`AnalysisWorkflowOutput` models.
+
+The experimental tools are deterministic and intentionally narrow:
+
+- `get_resume_text_tool`
+- `get_job_description_tool`
+- `get_recent_user_analysis_context_tool`
+- `build_structured_result_tool`
+
+The context tool only summarizes previous successful jobs for the same user:
+
+- previous missing skills
+- previous roadmap items
+- previous project suggestions
+
+It does not expose unrestricted database access to the LLM. If LangGraph is
+installed, the preview can run through a small `StateGraph`; otherwise it uses
+the same deterministic sequential fallback so local tests remain stable.
+
+Optional experimental dependencies:
+
+```bash
+python -m pip install langchain-core langgraph
+```
 
 Readiness endpoint:
 
