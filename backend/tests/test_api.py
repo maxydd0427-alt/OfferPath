@@ -1,4 +1,5 @@
 import os
+from uuid import uuid4
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 os.environ["OFFERPATH_DATABASE_URL"] = "sqlite:///./test_offerpath.db"
 os.environ["OFFERPATH_UPLOAD_DIR"] = "./test_storage/resumes"
 os.environ["STORAGE_BACKEND"] = "local"
+os.environ["OFFERPATH_AI_PROVIDER"] = "mock"
 Path("test_offerpath.db").unlink(missing_ok=True)
 
 from app.db import SessionLocal, init_db
@@ -26,16 +28,17 @@ def test_readiness_reports_database_and_optional_redis() -> None:
 
 
 def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
+    email = f"max-{uuid4().hex}@example.com"
     with TestClient(app) as client:
         response = client.post(
             "/auth/register",
-            json={"email": "max@example.com", "password": "strong-password"},
+            json={"email": email, "password": "strong-password"},
         )
         assert response.status_code == 201
 
         response = client.post(
             "/auth/login",
-            data={"username": "max@example.com", "password": "strong-password"},
+            data={"username": email, "password": "strong-password"},
         )
         assert response.status_code == 200
         token = response.json()["access_token"]
@@ -113,7 +116,11 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
         assert "skill_gap_comparison" in payload["intermediate_steps"]
         assert payload["live_status"]["status"] == "succeeded"
         assert payload["live_status"]["progress"] == 100
-        assert "redis" in payload["result"]["missing_skills"]
+        assert "matched_skills" in payload["result"]
+        assert "30_day_roadmap" in payload["result"]
+        assert "project_tasks" in payload["result"]
+        assert any(item["skill"] == "redis" for item in payload["result"]["missing_skills"])
+        assert all("priority" in item for item in payload["result"]["missing_skills"])
 
 
 def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
@@ -123,7 +130,7 @@ def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
 
     db = SessionLocal()
     try:
-        user = User(email="worker@example.com", hashed_password="not-used")
+        user = User(email=f"worker-{uuid4().hex}@example.com", hashed_password="not-used")
         db.add(user)
         db.commit()
         db.refresh(user)

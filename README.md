@@ -511,6 +511,100 @@ The Week 4 analysis workflow records:
 - intermediate steps
 - validated structured result JSON
 
+### Real demo flow: PDF resume to AI SRE action plan
+
+This flow demonstrates the real OfferPath product goal: upload a PDF resume,
+submit a target JD, run the async worker, and read a structured career gap
+analysis.
+
+Start Redis and the API locally:
+
+```bash
+docker compose up redis
+cd backend
+source .venv/bin/activate
+PYTHONPATH=. uvicorn app.main:app --reload
+```
+
+Open the API docs:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Use Swagger or curl to run the flow:
+
+1. Register a user with `POST /auth/register`.
+2. Login with `POST /auth/login` and copy the `access_token`.
+3. Authorize Swagger with `Bearer <access_token>`.
+4. Upload a text-based PDF resume with `POST /resumes`.
+5. Create an AI SRE analysis job with `POST /jobs`.
+
+Example AI SRE job body:
+
+```json
+{
+  "resume_id": 1,
+  "target_title": "AI SRE",
+  "job_description": "We need an AI SRE who can run production AI systems on AWS, build observability dashboards, debug incidents, operate Kubernetes workloads, design async queues, understand LLM workflows, write Python services, manage Redis/PostgreSQL, automate CI/CD, and explain reliability trade-offs."
+}
+```
+
+Run the worker once:
+
+```bash
+cd backend
+source .venv/bin/activate
+PYTHONPATH=. python -m worker.main --once
+```
+
+Then query the result:
+
+```text
+GET /jobs/{job_id}
+```
+
+Successful jobs return `status: "succeeded"` and a structured `result` with:
+
+- `matched_skills`
+- prioritized `missing_skills`
+- `weak_skills` and `partially_matched_skills`
+- `evidence_from_resume` and `evidence_from_jd`
+- `30_day_roadmap`
+- `project_tasks`
+- `interview_talking_points`
+- `resume_improvement_suggestions`
+
+The worker also saves useful `intermediate_steps` for:
+
+- `resume_understanding`
+- `jd_understanding`
+- `skill_gap_comparison`
+- `roadmap_generation`
+- `project_recommendation`
+- `interview_preparation`
+- `final_result_validation`
+
+To use the stable local mock provider:
+
+```text
+OFFERPATH_AI_PROVIDER=mock
+```
+
+To use Gemini for real AI output, set these values in your local
+`backend/.env` only:
+
+```text
+OFFERPATH_AI_PROVIDER=gemini
+OFFERPATH_GEMINI_MODEL=gemini-1.5-flash
+OFFERPATH_GEMINI_API_KEY=your-local-secret
+```
+
+Do not hardcode API keys in Python code. Do not commit real keys to
+`.env.example`, `.env.docker.example`, README examples, or source control.
+The example env files should contain placeholders only. Local secrets belong in
+`backend/.env`.
+
 ### S3-backed resume storage
 
 Resume files are stored outside the database. The upload API sends the original
