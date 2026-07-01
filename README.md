@@ -654,7 +654,7 @@ receive plain `resume_text`; they do not read S3 keys or parse PDFs directly.
 This keeps the design ready for future agent tools such as
 `read_resume_tool(job_id)` while keeping the production path simple.
 
-### Experimental LangChain/LangGraph preview
+### Experimental LangChain, LangGraph, and ReAct previews
 
 The default OfferPath workflow is still provider-based and production-oriented:
 
@@ -665,21 +665,34 @@ worker -> get_analysis_provider() -> mock/Gemini provider -> result_json
 That path is the only workflow used by `POST /jobs` and the worker by default.
 It validates `AnalysisResult` and saves `result_json` / `intermediate_json`.
 
-An isolated experimental preview lives under:
+Isolated experimental previews live under:
 
 ```text
 backend/app/services/agent_experimental/
 ```
 
-Its entrypoint is:
+The LangGraph-style preview entrypoint is:
 
 ```python
 run_langchain_analysis_preview(db, job_id)
 ```
 
-The preview compares tool-calling and context reuse ideas without changing the
-database schema and without overwriting production `result_json` by default. It
-shares the existing `AnalysisJob`, `Resume`, `AnalysisResult`, and
+It demonstrates stateful graph orchestration with input loading, previous
+analysis context loading, a mockable LLM step, and final Pydantic validation.
+
+The ReAct-style preview entrypoint is:
+
+```python
+run_react_analysis_preview(db, job_id)
+```
+
+It demonstrates a bounded Reason -> Act -> Observation loop with safe tool
+selection, previous-analysis context reuse, observations, and final structured
+output validation.
+
+Both previews compare tool-calling and context reuse ideas without changing the
+database schema and without overwriting production `result_json` by default.
+They share the existing `AnalysisJob`, `Resume`, `AnalysisResult`, and
 `AnalysisWorkflowOutput` models.
 
 The experimental tools are deterministic and intentionally narrow:
@@ -695,9 +708,11 @@ The context tool only summarizes previous successful jobs for the same user:
 - previous roadmap items
 - previous project suggestions
 
-It does not expose unrestricted database access to the LLM. If LangGraph is
-installed, the preview can run through a small `StateGraph`; otherwise it uses
-the same deterministic sequential fallback so local tests remain stable.
+They do not expose unrestricted database access to the LLM. If LangGraph is
+installed, the LangGraph preview can run through a small `StateGraph`;
+otherwise it uses the same deterministic sequential fallback so local tests
+remain stable. The ReAct preview is deterministic by default and does not
+require a real LLM call in tests.
 
 Optional experimental dependencies:
 
