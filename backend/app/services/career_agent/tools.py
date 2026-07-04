@@ -17,10 +17,6 @@ class RecentAnalysisContext(BaseModel):
     source_job_ids: list[int] = Field(default_factory=list)
 
 
-class JobToolInput(BaseModel):
-    job_id: int
-
-
 def get_resume_text_tool(db: Session, job_id: int) -> str:
     job = _get_job(db, job_id)
     storage = get_storage_service()
@@ -71,34 +67,6 @@ def get_recent_user_analysis_context_tool(
     context.previous_roadmap_items = _unique_preserve_order(context.previous_roadmap_items)[:10]
     context.previous_project_suggestions = _unique_preserve_order(context.previous_project_suggestions)[:10]
     return context
-
-
-def build_langchain_tools(db: Session) -> list[Any]:
-    try:
-        from langchain_core.tools import StructuredTool
-    except ImportError:
-        return []
-
-    return [
-        StructuredTool.from_function(
-            name="get_resume_text_tool",
-            description="Read parsed resume text for a known AnalysisJob id.",
-            func=lambda job_id: get_resume_text_tool(db, job_id),
-            args_schema=JobToolInput,
-        ),
-        StructuredTool.from_function(
-            name="get_job_description_tool",
-            description="Read the target job description for a known AnalysisJob id.",
-            func=lambda job_id: get_job_description_tool(db, job_id),
-            args_schema=JobToolInput,
-        ),
-        StructuredTool.from_function(
-            name="get_recent_user_analysis_context_tool",
-            description="Summarize recent successful analyses for the same AnalysisJob owner.",
-            func=lambda job_id: get_recent_user_analysis_context_tool(db, job_id).model_dump(),
-            args_schema=JobToolInput,
-        ),
-    ]
 
 
 def _get_job(db: Session, job_id: int) -> AnalysisJob:

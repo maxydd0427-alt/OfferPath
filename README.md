@@ -75,7 +75,7 @@ backend/app/services/career_agent/
 The key entrypoint is:
 
 ```python
-run_career_agent_preview(db, job_id, user_feedback=None)
+run_career_agent_preview(db, job_id, user_feedback=None, mcp_client=None)
 ```
 
 This preview demonstrates a bounded ReAct loop:
@@ -102,18 +102,39 @@ Current agent structure:
 career_agent/
   __init__.py
   tools.py              # safe internal tools for resume/JD/history
-  result_builder.py     # builds and validates AnalysisResult
+  structured_result_builder.py  # builds and validates AnalysisResult
   mcp_adapters.py       # GitHub/Notion/Gmail adapter boundary
   career_agent.py       # ReAct orchestration loop
 ```
 
-The MCP adapter is currently deterministic and safe for tests. It does not call real GitHub, Notion, or Gmail yet. The boundary is ready for real MCP connectors later:
+The MCP adapter now has two modes:
+
+- deterministic fallback for tests and local preview
+- injected real MCP client for GitHub, Notion, and Gmail tools
+
+The backend does not directly depend on Codex/IDE connectors. A deployed
+FastAPI process must pass its own MCP runtime client, or an adapter around the
+official GitHub/Notion/Gmail APIs. This keeps the career agent clean and avoids
+leaking unrestricted external access into the ReAct loop.
+
+The external tool actions are:
 
 ```text
 github_mcp_search_reference_projects
 notion_mcp_draft_learning_note
 gmail_mcp_draft_progress_update
 ```
+
+The injected MCP client boundary is intentionally small:
+
+```python
+class MCPToolClient:
+    def call_tool(self, server: str, tool_name: str, arguments: dict) -> object:
+        ...
+```
+
+This lets the product replace the deterministic fallback with real MCP servers
+without changing the agent loop.
 
 Safety rules:
 

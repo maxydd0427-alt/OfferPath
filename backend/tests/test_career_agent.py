@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from app.core.config import get_settings
@@ -169,6 +170,52 @@ def test_career_agent_drafts_external_mcp_actions_without_publishing(
         db.close()
 
 
+def test_career_agent_can_use_injected_real_mcp_client(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _configure_local_test_env(tmp_path, monkeypatch)
+    db = SessionLocal()
+    try:
+        user = _create_user(db)
+        resume = _create_resume(db, user, tmp_path, "Python FastAPI Docker testing")
+        current_job = _create_job(db, user, resume)
+        db.commit()
+        mcp_client = FakeMCPToolClient()
+
+        output = run_career_agent_preview(db, current_job.id, mcp_client=mcp_client)
+
+        assert output.intermediate_steps["mcp_runtime"] == "real_mcp_client"
+        assert [call["tool_name"] for call in mcp_client.calls] == [
+            "search_repositories",
+            "create_page_draft",
+            "create_draft",
+        ]
+
+        github_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "github_mcp_search_reference_projects"
+        )
+        notion_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "notion_mcp_draft_learning_note"
+        )
+        gmail_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "gmail_mcp_draft_progress_update"
+        )
+        assert github_observation["observation"]["candidates"][0]["name"] == "aws-samples/ai-sre-reference"
+        assert notion_observation["observation"]["external_id"] == "notion-draft-1"
+        assert notion_observation["observation"]["published"] is False
+        assert gmail_observation["observation"]["external_id"] == "gmail-draft-1"
+        assert gmail_observation["observation"]["sent"] is False
+    finally:
+        db.close()
+
+
 def test_career_agent_uses_previous_successful_analysis_context(
     tmp_path: Path,
     monkeypatch,
@@ -201,6 +248,46 @@ def test_career_agent_uses_previous_successful_analysis_context(
         assert "Build on prior advice: Build a Kubernetes-backed AI service" in output.result.project_suggestions
     finally:
         db.close()
+
+
+class FakeMCPToolClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def call_tool(self, server: str, tool_name: str, arguments: dict[str, Any]) -> Any:
+        self.calls.append({"server": server, "tool_name": tool_name, "arguments": arguments})
+        if server == "github":
+            return {
+                "items": [
+                    {
+                        "full_name": "aws-samples/ai-sre-reference",
+                        "html_url": "https://github.com/aws-samples/ai-sre-reference",
+                        "description": "Reference architecture for reliable AI services on AWS.",
+                        "matched_skills": ["AWS", "observability", "incident response"],
+                    }
+                ]
+            }
+        if server == "notion":
+            assert arguments["published"] is False
+            assert arguments["safe_mode"] == "draft_only"
+            return {
+                "id": "notion-draft-1",
+                "url": "https://notion.so/notion-draft-1",
+                "title": arguments["title"],
+                "sections": arguments["sections"],
+                "published": False,
+            }
+        if server == "gmail":
+            assert arguments["send"] is False
+            assert arguments["safe_mode"] == "draft_only"
+            return {
+                "id": "gmail-draft-1",
+                "subject": arguments["subject"],
+                "body": arguments["body"],
+                "to": arguments["to"],
+                "sent": False,
+            }
+        raise AssertionError(f"Unexpected MCP server: {server}")
 
 
 def _configure_local_test_env(tmp_path: Path, monkeypatch) -> None:

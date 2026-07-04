@@ -42,7 +42,7 @@ def build_structured_result_tool(
         result.resume_improvement_suggestions or build_resume_suggestions(result.missing_skills)
     )
     if llm_payload.get("summary_hint"):
-        result.summary = f"{result.summary} Experimental context note: {llm_payload['summary_hint']}."
+        result.summary = f"{result.summary} Agent context note: {llm_payload['summary_hint']}."
     if llm_payload.get("user_feedback"):
         feedback = str(llm_payload["user_feedback"]).strip()
         result.summary = f"{result.summary} Roadmap revision feedback applied: {feedback}."

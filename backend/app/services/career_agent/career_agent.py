@@ -4,14 +4,14 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import AnalysisJob
-from app.services.career_agent.mcp_adapters import create_mcp_adapter
+from app.services.career_agent.mcp_adapters import MCPAdapterConfig, MCPToolClient, create_mcp_adapter
 from app.services.career_agent.tools import (
     RecentAnalysisContext,
     get_job_description_tool,
     get_recent_user_analysis_context_tool,
     get_resume_text_tool,
 )
-from app.services.career_agent.result_builder import build_structured_result_tool
+from app.services.career_agent.structured_result_builder import build_structured_result_tool
 from app.services.analysis import AnalysisResult, AnalysisWorkflowOutput
 
 REACT_WORKFLOW_VERSION = "career-agent-react-v0"
@@ -29,6 +29,8 @@ def run_career_agent_preview(
     db: Session,
     job_id: int,
     user_feedback: str | None = None,
+    mcp_client: MCPToolClient | None = None,
+    mcp_config: MCPAdapterConfig | None = None,
 ) -> AnalysisWorkflowOutput:
     job = db.get(AnalysisJob, job_id)
     if job is None:
@@ -50,9 +52,12 @@ def run_career_agent_preview(
         "github_reference_projects": [],
         "notion_note_draft": None,
         "gmail_draft": None,
+        "mcp_adapter": create_mcp_adapter(client=mcp_client, config=mcp_config),
+        "mcp_runtime": "real_mcp_client" if mcp_client is not None else "deterministic_fallback",
     }
     intermediate_steps: dict[str, Any] = {
         "mode": "career_agent_react_loop",
+        "mcp_runtime": state["mcp_runtime"],
         "available_tools": _available_tools(),
         "external_mcp_policy": {
             "github": "read/search only in preview",
@@ -201,7 +206,7 @@ def _execute_action(
             "roadmap_item_count": len(result.thirty_day_roadmap),
         }
     if action.tool_name == "github_mcp_search_reference_projects":
-        adapter = create_mcp_adapter()
+        adapter = state["mcp_adapter"]
         result = state.get("result") or _finalize_result(state)
         state["result"] = result
         projects = adapter.search_github_reference_projects(
@@ -214,7 +219,7 @@ def _execute_action(
             "candidates": [project.model_dump() for project in projects],
         }
     if action.tool_name == "notion_mcp_draft_learning_note":
-        adapter = create_mcp_adapter()
+        adapter = state["mcp_adapter"]
         result = state.get("result") or _finalize_result(state)
         state["result"] = result
         draft = adapter.draft_notion_learning_note(
@@ -225,7 +230,7 @@ def _execute_action(
         state["notion_note_draft"] = draft
         return draft.model_dump()
     if action.tool_name == "gmail_mcp_draft_progress_update":
-        adapter = create_mcp_adapter()
+        adapter = state["mcp_adapter"]
         result = state.get("result") or _finalize_result(state)
         state["result"] = result
         draft = adapter.draft_gmail_progress_update(
