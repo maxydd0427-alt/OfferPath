@@ -1,3 +1,4 @@
+import json
 import os
 from uuid import uuid4
 from pathlib import Path
@@ -10,6 +11,7 @@ os.environ["STORAGE_BACKEND"] = "local"
 os.environ["OFFERPATH_AI_PROVIDER"] = "mock"
 Path("test_offerpath.db").unlink(missing_ok=True)
 
+from app.core.config import get_settings
 from app.db import SessionLocal, init_db
 from app.main import app
 from app.models import AnalysisJob, JobStatus, Resume, User
@@ -173,3 +175,60 @@ def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
         assert job.prompt_version == "mock-v1"
     finally:
         db.close()
+
+
+def test_worker_can_run_career_agent_workflow(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OFFERPATH_ANALYSIS_WORKFLOW", "career_agent")
+    monkeypatch.setenv("OFFERPATH_AGENT_PLANNER", "heuristic")
+    monkeypatch.delenv("OFFERPATH_BEDROCK_KB_ID", raising=False)
+    get_settings.cache_clear()
+    init_db()
+    resume_file = tmp_path / "resume.txt"
+    resume_file.write_text("Python FastAPI Docker testing", encoding="utf-8")
+
+    db = SessionLocal()
+    try:
+        user = User(email=f"agent-worker-{uuid4().hex}@example.com", hashed_password="not-used")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        resume = Resume(
+            owner_id=user.id,
+            original_filename="resume.txt",
+            stored_path=str(resume_file),
+            storage_backend="local",
+            content_type="text/plain",
+            file_size=resume_file.stat().st_size,
+        )
+        db.add(resume)
+        db.commit()
+        db.refresh(resume)
+
+        job = AnalysisJob(
+            owner_id=user.id,
+            resume_id=resume.id,
+            target_title="AI SRE",
+            job_description="Python FastAPI Redis AWS Kubernetes observability incident response",
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        processed_job_id = process_next_queued_job(db)
+
+        db.refresh(job)
+        assert processed_job_id == job.id
+        assert job.status == JobStatus.succeeded
+        assert job.ai_provider == "career-agent"
+        assert job.workflow_version == "career-agent-react-v0"
+        assert job.prompt_version == "career-agent-mcp-v0"
+        assert job.result_json is not None
+        assert job.intermediate_json is not None
+        intermediate_steps = json.loads(job.intermediate_json)
+        assert intermediate_steps["planner"] == "heuristic_state_planner"
+        assert intermediate_steps["stop_reason"] == "planner_finished"
+    finally:
+        db.close()
+        monkeypatch.setenv("OFFERPATH_ANALYSIS_WORKFLOW", "provider")
+        get_settings.cache_clear()

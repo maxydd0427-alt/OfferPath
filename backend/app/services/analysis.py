@@ -395,16 +395,18 @@ def run_analysis(db: Session, job_id: int) -> bool:
             log_event(logger, logging.INFO, "analysis_job.already_succeeded", job_id=job_id)
             return False
 
-        provider = get_analysis_provider()
+        settings = get_settings()
+        workflow_name = settings.analysis_workflow.lower()
+        provider = None if workflow_name == "career_agent" else get_analysis_provider()
         job.status = JobStatus.processing
         job.attempt_count += 1
         job.started_at = utc_now()
         job.finished_at = None
         job.last_error = None
         job.error_message = None
-        job.ai_provider = provider.name
-        job.workflow_version = WORKFLOW_VERSION
-        job.prompt_version = provider.prompt_version
+        job.ai_provider = "career-agent" if workflow_name == "career_agent" else provider.name
+        job.workflow_version = "career-agent-react-v0" if workflow_name == "career_agent" else WORKFLOW_VERSION
+        job.prompt_version = "career-agent-mcp-v0" if workflow_name == "career_agent" else provider.prompt_version
         db.commit()
         db.refresh(job)
         set_job_status(
@@ -420,47 +422,59 @@ def run_analysis(db: Session, job_id: int) -> bool:
             "analysis_job.started",
             job_id=job.id,
             attempt_count=job.attempt_count,
-            ai_provider=provider.name,
-            workflow_version=WORKFLOW_VERSION,
+            ai_provider=job.ai_provider,
+            workflow_version=job.workflow_version,
             status=job.status.value,
         )
 
-        set_job_status(
-            job.id,
-            status=job.status.value,
-            step="reading_resume_from_s3",
-            progress=20,
-            message="Reading resume bytes from storage.",
-        )
-        storage = get_storage_service()
-        file_bytes = storage.read_file(job.resume.stored_path)
-        set_job_status(
-            job.id,
-            status=job.status.value,
-            step="parsing_resume",
-            progress=35,
-            message="Extracting resume text.",
-        )
-        try:
-            resume_text = extract_resume_text(
-                file_bytes=file_bytes,
-                filename=job.resume.original_filename,
-                content_type=job.resume.content_type,
+        if workflow_name == "career_agent":
+            set_job_status(
+                job.id,
+                status=job.status.value,
+                step="running_career_agent",
+                progress=60,
+                message="Running the ReAct career agent.",
             )
-        except (RuntimeError, ValueError) as exc:
-            raise ResumeExtractionError(f"PDF text extraction failure: {exc}") from exc
-        set_job_status(
-            job.id,
-            status=job.status.value,
-            step="running_analysis_provider",
-            progress=60,
-            message=f"Running {provider.name} analysis provider.",
-        )
-        output = provider.run(
-            target_title=job.target_title,
-            resume_text=resume_text,
-            job_description=job.job_description,
-        )
+            output = run_career_agent_analysis(db, job.id)
+        elif workflow_name == "provider":
+            set_job_status(
+                job.id,
+                status=job.status.value,
+                step="reading_resume_from_storage",
+                progress=20,
+                message="Reading resume bytes from storage.",
+            )
+            storage = get_storage_service()
+            file_bytes = storage.read_file(job.resume.stored_path)
+            set_job_status(
+                job.id,
+                status=job.status.value,
+                step="parsing_resume",
+                progress=35,
+                message="Extracting resume text.",
+            )
+            try:
+                resume_text = extract_resume_text(
+                    file_bytes=file_bytes,
+                    filename=job.resume.original_filename,
+                    content_type=job.resume.content_type,
+                )
+            except (RuntimeError, ValueError) as exc:
+                raise ResumeExtractionError(f"PDF text extraction failure: {exc}") from exc
+            set_job_status(
+                job.id,
+                status=job.status.value,
+                step="running_analysis_provider",
+                progress=60,
+                message=f"Running {provider.name} analysis provider.",
+            )
+            output = provider.run(
+                target_title=job.target_title,
+                resume_text=resume_text,
+                job_description=job.job_description,
+            )
+        else:
+            raise RuntimeError(f"Unsupported analysis workflow: {settings.analysis_workflow}")
 
         set_job_status(
             job.id,
@@ -532,6 +546,20 @@ def get_analysis_provider() -> AnalysisProvider:
     if provider_name == "mock":
         return MockAnalysisProvider()
     raise RuntimeError(f"Unsupported AI provider: {settings.ai_provider}")
+
+
+def run_career_agent_analysis(db: Session, job_id: int) -> AnalysisWorkflowOutput:
+    from app.services.career_agent import run_career_agent_preview
+    from app.services.rag import BedrockKnowledgeBaseRetriever
+
+    settings = get_settings()
+    rag_retriever = BedrockKnowledgeBaseRetriever() if settings.bedrock_kb_id else None
+    return run_career_agent_preview(
+        db,
+        job_id,
+        rag_retriever=rag_retriever,
+    )
+
 
 def _mark_job_failed(job: AnalysisJob, exc: Exception) -> None:
     error = classify_analysis_error(exc)

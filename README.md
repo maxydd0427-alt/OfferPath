@@ -62,7 +62,24 @@ This path is intentionally boring and reliable. It supports:
 - structured Pydantic validation before saving results
 - Redis-backed rate limiting, idempotency, live status, and worker locks
 
-The production API does not depend on experimental agent code by default.
+By default the worker still runs the provider workflow. For the agentic product
+path, enable the career agent workflow:
+
+```bash
+OFFERPATH_ANALYSIS_WORKFLOW=career_agent
+OFFERPATH_AGENT_PLANNER=llm
+```
+
+Then the async path becomes:
+
+```text
+POST /jobs
+-> worker
+-> ReAct career agent
+-> optional Bedrock KB RAG
+-> MCP adapter observations
+-> result_json / intermediate_json
+```
 
 ## ReAct Career Agent
 
@@ -75,13 +92,50 @@ backend/app/services/career_agent/
 The key entrypoint is:
 
 ```python
-run_career_agent_preview(db, job_id, user_feedback=None, mcp_client=None)
+run_career_agent_preview(db, job_id, user_feedback=None, mcp_client=None, rag_retriever=None, planner=None)
 ```
 
-This preview demonstrates a bounded ReAct loop:
+This preview demonstrates a bounded dynamic ReAct loop:
 
 ```text
-Reason -> Act -> Observation -> ... -> validated final output
+Planner reason -> Act -> Observation -> Planner reason -> ... -> validated final output
+```
+
+The agent no longer executes a fully fixed action list. It supports two planners:
+
+- `HeuristicAgentPlanner`: deterministic state-based planning for tests and safe local runs.
+- `LLMReActPlanner`: Gemini-backed planner that chooses the next tool from state and observations.
+
+The planner chooses the next tool from current state:
+
+- missing resume text -> read resume
+- missing JD -> read JD
+- missing history -> read previous analysis context
+- RAG configured -> retrieve user-scoped Bedrock KB context
+- no structured result -> build and validate result
+- user feedback exists -> revise roadmap
+- missing project references -> search GitHub
+- missing learning note -> draft Notion note
+- missing progress update -> draft Gmail email
+
+The LLM planner returns only a JSON decision:
+
+```json
+{
+  "thought": "I need user-scoped career memory before building the roadmap.",
+  "action": "retrieve_career_rag_context_tool"
+}
+```
+
+The backend validates the action against the allowlist before execution. Tool
+execution remains bounded by `REACT_MAX_STEPS`, and write-capable tools remain
+draft-only.
+
+To use the LLM planner locally:
+
+```bash
+OFFERPATH_AGENT_PLANNER=llm
+OFFERPATH_GEMINI_API_KEY=your-local-key
 ```
 
 The ReAct agent is the intended iterative product flow. It can:
@@ -101,6 +155,7 @@ Current agent structure:
 ```text
 career_agent/
   __init__.py
+  planner.py           # heuristic and LLM ReAct planners
   tools.py              # safe internal tools for resume/JD/history
   structured_result_builder.py  # builds and validates AnalysisResult
   mcp_adapters.py       # GitHub/Notion/Gmail adapter boundary
@@ -148,7 +203,7 @@ MCP and retrieval outputs are observations inside the ReAct loop, not just
 post-processing. They can shape the roadmap before the final validated result
 is returned.
 
-## RAG Plan
+## Bedrock KB RAG
 
 OfferPath should use **Amazon Bedrock Managed Knowledge Base** as the RAG layer.
 
@@ -164,22 +219,36 @@ Target RAG sources:
 - company/job-role documents
 - useful technical references
 
-Planned Bedrock KB design:
+Current backend design:
 
 ```text
 S3 documents
 -> Bedrock Managed Knowledge Base
 -> metadata-filtered retrieval
 -> retrieved context
--> ReAct career agent / AnalysisProvider
+-> ReAct career agent observation
+-> structured roadmap validation
 ```
+
+The code entrypoints are:
+
+```text
+backend/app/services/rag/bedrock_kb_client.py
+backend/app/services/rag/career_context_retriever.py
+retrieve_career_rag_context_tool
+```
+
+The ReAct career agent calls retrieval before building the structured result,
+so RAG can influence the roadmap instead of appearing as a post-processing
+appendix.
 
 Important production details:
 
 - Add `user_id` metadata to documents/chunks.
 - Always filter retrieval by `user_id`.
 - Enable hybrid search where the Bedrock KB vector store supports it.
-- Report retrieval latency and error metrics to CloudWatch.
+- Report retrieval latency, empty retrievals, item counts, errors, and top scores to CloudWatch.
+- Generate a tuning report after each retrieval observation.
 
 Example retrieval filter:
 
@@ -208,6 +277,83 @@ agentic tool orchestration
 structured output validation
 ```
 
+Environment variables:
+
+```bash
+OFFERPATH_ANALYSIS_WORKFLOW=career_agent
+OFFERPATH_AGENT_PLANNER=llm
+OFFERPATH_BEDROCK_KB_ID=your-knowledge-base-id
+OFFERPATH_AWS_REGION=us-east-1
+OFFERPATH_BEDROCK_KB_SEARCH_TYPE=HYBRID
+OFFERPATH_BEDROCK_KB_NUMBER_OF_RESULTS=5
+OFFERPATH_RAG_METRICS_ENABLED=true
+```
+
+AWS setup checklist:
+
+1. Create an S3 bucket for RAG documents.
+2. Upload resumes, JDs, project notes, learning notes, and interview notes.
+3. Attach metadata to documents/chunks, especially `user_id`.
+4. Create a Bedrock Knowledge Base with Titan Embeddings v2 or another approved embedding model.
+5. Sync the data source.
+6. Run backend retrieval with the enforced `user_id` filter.
+7. Check CloudWatch custom metrics under `OfferPath/RAG`.
+
+RAG tuning loop:
+
+```text
+CloudWatch metrics
+-> latency / empty retrieval / retrieved item count / top score
+-> RAG tuning report
+-> adjust retrieval settings, metadata, chunking, sync, or caching
+-> rerun evaluation
+```
+
+Useful signals:
+
+- High `RetrievalLatency`: check P95, reduce `numberOfResults`, add caching, and verify app/KB region.
+- High `EmptyRetrievals`: verify S3 sync, `user_id` metadata, chunking, and query construction.
+- Low `RetrievedItems`: add more user notes/JDs or increase `numberOfResults`.
+- Low `TopResultScore`: improve chunk quality and add metadata like `document_type` and `target_role`.
+- Missing exact terms like `AWS` or `Kubernetes`: keep `HYBRID` search enabled.
+
+## Next Production Work
+
+These are the next six production hardening items:
+
+1. Connect real Bedrock KB RAG
+   - Create the AWS Knowledge Base.
+   - Upload S3 documents with `user_id` metadata.
+   - Sync and verify filtered HYBRID retrieval.
+   - Build a CloudWatch dashboard for retrieval quality and latency.
+
+2. Connect real MCP runtime
+   - Replace deterministic GitHub/Notion/Gmail fallback with backend-owned MCP clients or official API adapters.
+   - Keep GitHub read/search oriented.
+   - Keep Notion and Gmail draft-only until explicit user confirmation.
+
+3. Harden the LLM planner
+   - Add retry for invalid planner JSON.
+   - Add repeated-action guard.
+   - Add tool failure recovery.
+   - Track planner latency, token cost, and decision errors.
+
+4. Persist resumable agent state
+   - Store each tool call and observation.
+   - Resume from the last successful step after failure.
+   - Allow user feedback to continue an existing roadmap session.
+
+5. Add evaluation
+   - Test tenant isolation for RAG filters.
+   - Measure retrieval recall and empty retrieval rate.
+   - Check whether roadmap items cite retrieved context.
+   - Evaluate GitHub reference relevance and planner tool choices.
+
+6. Add user confirmation flows
+   - Let users approve Notion note publishing.
+   - Let users approve Gmail draft sending.
+   - Keep all write actions auditable in intermediate steps.
+
 ## Backend Stack
 
 - FastAPI
@@ -217,7 +363,7 @@ structured output validation
 - S3-compatible resume storage boundary
 - Gemini provider
 - Mock provider for tests
-- Bedrock KB planned for RAG
+- Bedrock KB RAG boundary with metadata filtering, hybrid search, and CloudWatch metrics
 - ReAct career agent adapter boundary for GitHub, Notion, and Gmail
 
 ## Local Setup

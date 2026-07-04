@@ -13,7 +13,15 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
     upload_dir: str = "./storage/resumes"
     redis_url: str = "redis://localhost:6379/0"
+    analysis_workflow: str = Field(
+        default="provider",
+        validation_alias=AliasChoices("OFFERPATH_ANALYSIS_WORKFLOW", "ANALYSIS_WORKFLOW"),
+    )
     ai_provider: str = "mock"
+    agent_planner: str = Field(
+        default="heuristic",
+        validation_alias=AliasChoices("OFFERPATH_AGENT_PLANNER", "AGENT_PLANNER"),
+    )
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-1.5-flash"
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174"
@@ -32,6 +40,26 @@ class Settings(BaseSettings):
     s3_resume_prefix: str = Field(
         default="resumes",
         validation_alias=AliasChoices("OFFERPATH_S3_RESUME_PREFIX", "S3_RESUME_PREFIX"),
+    )
+    bedrock_kb_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OFFERPATH_BEDROCK_KB_ID", "BEDROCK_KB_ID"),
+    )
+    bedrock_kb_search_type: str = Field(
+        default="HYBRID",
+        validation_alias=AliasChoices("OFFERPATH_BEDROCK_KB_SEARCH_TYPE", "BEDROCK_KB_SEARCH_TYPE"),
+    )
+    bedrock_kb_number_of_results: int = Field(
+        default=5,
+        validation_alias=AliasChoices("OFFERPATH_BEDROCK_KB_NUMBER_OF_RESULTS", "BEDROCK_KB_NUMBER_OF_RESULTS"),
+    )
+    rag_metrics_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("OFFERPATH_RAG_METRICS_ENABLED", "RAG_METRICS_ENABLED"),
+    )
+    rag_metrics_namespace: str = Field(
+        default="OfferPath/RAG",
+        validation_alias=AliasChoices("OFFERPATH_RAG_METRICS_NAMESPACE", "RAG_METRICS_NAMESPACE"),
     )
     aws_access_key_id: str | None = Field(
         default=None,
