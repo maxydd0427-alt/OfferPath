@@ -1,342 +1,207 @@
 # OfferPath
 
-**OfferPath** is an agentic career growth platform that helps users turn resumes and job descriptions into an actionable roadmap.
+OfferPath is an agentic career growth backend that turns a resume and a target job description into a structured skill gap analysis, 30-day roadmap, proof-oriented project tasks, and interview preparation plan.
 
-It does not just rewrite resumes or generate generic advice. Instead, it analyzes the gap between a candidate’s current skills and a target role, then produces a structured improvement plan, recommended project directions, and interview preparation tasks.
+The long-term product goal is not only to generate advice. OfferPath should help a user repeatedly improve toward a target role by combining:
 
-The system is designed as a real backend engineering project with async job processing, queue-based task execution, cloud deployment, and AI-powered decision workflows.
+- resume and JD analysis
+- long-term personal career context
+- RAG over resumes, JDs, notes, projects, and interview records
+- ReAct-style career agent orchestration for market JD search, GitHub references, Notion notes, and Gmail drafts
 
----
+## Product Direction
 
-## 1. Why this project exists
-
-In the AI era, many people can make their resumes look polished, but their real skill level may not match what the resume suggests.
-
-At the same time, most job descriptions are not useful by themselves unless someone can answer these questions:
-
-- What skills does this role actually require?
-- Which of those skills do I already have?
-- What am I missing?
-- What should I learn first?
-- What kind of project can prove those skills?
-- What interview questions am I likely to face next?
-
-OfferPath is built to answer those questions in a structured and personalized way.
-
-Its core idea is:
+The core idea is:
 
 ```text
-Resume + JD -> Skill Gap Analysis -> Actionable Roadmap -> Iterative Growth
+Resume + Target JD
+-> structured skill gap analysis
+-> roadmap
+-> user feedback revision
+-> similar JD / market signal retrieval
+-> GitHub reference projects
+-> Notion learning notes
+-> Gmail progress drafts
+-> iterative improvement
 ```
 
-This is not just an AI demo. It is meant to be a serious backend project that reflects real engineering concerns and real job-market demand.
+For roles such as AI SRE, backend engineer, cloud engineer, and AI agent engineer, OfferPath should answer:
 
----
+- Which skills does this role require?
+- Which skills does the resume already prove?
+- Which skills are missing or weak?
+- What should the user learn in the next 30 days?
+- What project can prove those skills?
+- What do similar JDs ask for in the market?
+- Which GitHub projects are useful references?
+- What should be saved as learning notes?
+- What progress update or outreach email should be drafted?
 
-## 2. Product vision
+## Current Architecture
 
-OfferPath helps users:
+The stable backend path is still provider-based:
 
-- upload a resume
-- submit a target JD
-- analyze skill gaps between the resume and the role
-- generate a prioritized learning roadmap
-- recommend proof-oriented project directions
-- generate targeted interview preparation questions
-- track progress over time and update recommendations
+```text
+FastAPI
+-> AnalysisJob
+-> worker
+-> AnalysisProvider
+-> AnalysisResult
+-> result_json / intermediate_json
+```
 
-In later versions, the system can evolve into a personal career copilot that continuously monitors progress and refines the roadmap.
-
----
-
-## 3. Core v1 scope
-
-Version 1 focuses on a strong backend-first MVP.
-
-### v1 user flow
-
-1. User uploads a resume.
-2. User submits a target job description.
-3. System creates an analysis job.
-4. Job is processed asynchronously.
-5. AI workflow extracts skills from resume and JD.
-6. System performs gap analysis.
-7. System generates:
-   - missing skills summary
-   - prioritized learning roadmap
-   - suggested project directions
-   - likely interview topics/questions
-8. User checks job status and reads the result.
-
-### v1 features
+This path is intentionally boring and reliable. It supports:
 
 - user registration and login
-- resume upload
-- JD submission
-- async analysis job creation
-- job status tracking
-- AI-powered skill extraction and comparison
-- roadmap generation
-- project recommendation generation
-- interview question generation
-- result persistence and history
-- retry and failure visibility
-
----
-
-## 4. What makes this project valuable
-
-This project is intentionally designed to cover both **AI/agent trends** and **real backend engineering skills**.
-
-### AI / agent side
-
-- resume understanding
-- JD understanding
-- skill extraction
-- gap analysis
-- roadmap generation
-- multi-step workflow
-- tool usage orchestration
-- stateful progress tracking (later versions)
+- PDF/TXT resume upload
+- target JD submission
+- async job creation
+- worker processing
+- mock provider for local tests
+- Gemini provider for real AI output
+- structured Pydantic validation before saving results
+- Redis-backed rate limiting, idempotency, live status, and worker locks
 
-### Backend engineering side
-
-- REST API design
-- async processing
-- queue-based decoupling
-- job state machine
-- PostgreSQL schema design
-- Redis for caching / idempotency / rate limiting
-- S3-backed resume object storage
-- Dockerized services
-- CI/CD pipeline
-- AWS deployment
-- HTTP / HTTPS / reverse proxy concepts
-- logs, retries, and failure handling
+The production API does not depend on experimental agent code by default.
 
----
+## ReAct Career Agent
 
-## 5. Why this is more than “just calling an LLM API”
-
-OfferPath is not meant to be a thin wrapper around a model.
-
-A weak version of this product would simply do:
-
-- upload resume
-- paste JD
-- call model once
-- return text
-
-OfferPath aims to be stronger than that.
-
-It treats the task as an engineered workflow:
-
-- input storage
-- task creation
-- async job execution
-- structured intermediate analysis
-- result persistence
-- tool-assisted orchestration
-- future progress updates
-
-That makes it closer to an **agentic backend system** than a simple AI demo.
-
----
-
-## 6. v1 architecture direction
-
-### Suggested stack
-
-- **Backend API:** FastAPI
-- **Database:** PostgreSQL
-- **Cache / control:** Redis
-- **Object storage:** Amazon S3
-- **Queue:** Amazon SQS
-- **Worker:** Python worker service
-- **AI provider:** model API (pluggable)
-- **Deployment:** Docker + AWS EC2 first, ECS later
-- **CI/CD:** GitHub Actions
-- **Reverse proxy / HTTPS:** Nginx + optional domain/SSL
-
-### High-level flow
-
-1. Client uploads resume and JD.
-2. Backend stores metadata in PostgreSQL.
-3. Resume file is stored in S3.
-4. Backend creates an analysis job.
-5. Job ID is pushed to SQS.
-6. Worker consumes the job.
-7. Worker extracts structured information.
-8. Worker calls model tools for comparison and planning.
-9. Worker stores the result in PostgreSQL.
-10. Client queries job status and result.
-
----
-
-## 7. What “agentic” means in this project
-
-OfferPath should not pretend to be a fully autonomous general agent.
-
-For this project, “agentic” means:
-
-- the system accepts a goal, not just a question
-- the system decomposes the problem into multiple steps
-- the system uses multiple tools/modules during analysis
-- the system stores job state and intermediate progress
-- the system generates action-oriented output instead of generic text
-- future versions can update recommendations based on user progress
-
-This keeps the agent concept grounded and credible.
-
----
-
-## 8. Target interview value
-
-This project is designed to support discussion around:
-
-- why async processing is needed for long-running AI tasks
-- how queue-based decoupling improves reliability
-- how to prevent duplicate job creation with idempotency
-- when to use Redis vs PostgreSQL vs S3
-- how to design job states and retry strategies
-- how CI/CD reduces deployment risk
-- how HTTP and HTTPS fit into production deployment
-- how to evolve from a single backend service to a more scalable architecture
-
----
-
-## 9. Six-week development strategy
-
-### Week 1 — Define and build the base system
-
-- finalize project scope
-- create repository structure
-- write README v0.1
-- design database schema
-- implement auth and basic APIs
-- implement resume upload and JD submission
-- create job records
-- make the end-to-end flow run locally with mock analysis
-
-### Week 2 — Build async job processing
-
-- add worker service
-- add SQS-based job dispatch
-- implement real analysis flow
-- generate structured output:
-  - skill gap summary
-  - roadmap
-  - project suggestions
-  - interview questions
-- add job status transitions and error handling
-
-### Week 3 — Engineering and AWS deployment
-
-- dockerize API and worker services
-- add Docker Compose for local API / worker / PostgreSQL / Redis
-- make configuration work across local SQLite, Docker PostgreSQL, and future AWS RDS
-- add Redis connectivity as the foundation for idempotency, rate limiting, and job locks
-- add structured logging for API and worker execution
-- document local, Docker, and production-like environment variables
-- keep AWS deployment-ready boundaries for S3 / RDS / SQS without requiring cloud setup yet
-
-### Week 4 — Local Agentic AI workflow
-
-- replace mock analysis with a pluggable AI provider interface
-- keep the mock provider available for local testing and CI
-- split analysis into a multi-step workflow:
-  - resume understanding
-  - JD understanding
-  - skill gap comparison
-  - roadmap generation
-  - project recommendation
-  - interview preparation
-- require structured JSON output from the AI workflow
-- validate AI results before storing them
-- add prompt and workflow version tracking
-- add retry and failure handling for model calls
-- keep the agentic behavior grounded in job state, stored results, and explainable intermediate steps
-
-### Week 5 — Testing and CI/CD
-
-- expand automated tests for auth, uploads, jobs, worker processing, health checks, and AI workflow validation
-- add GitHub Actions for test execution
-- add Docker build checks for API and worker images
-- add Docker Compose configuration validation
-- perform simple local load testing against key endpoints
-- refine README, architecture explanation, and demo flow
-- prepare resume bullet points and interview talking points
-
-### Week 6 — AWS deployment
-
-- deploy the API and worker first on EC2 using Docker Compose
-- configure environment variables and secrets for the EC2 deployment
-- run PostgreSQL and Redis in the initial Compose-based EC2 setup if managed services are not ready
-- prepare migration path from local containers to AWS managed services:
-  - PostgreSQL container -> Amazon RDS
-  - local resume storage -> Amazon S3
-  - database-backed queue simulation -> Amazon SQS
-  - Redis container -> Amazon ElastiCache
-- add production deployment notes for logs, ports, HTTPS, Nginx, and domain/SSL
-- document rollback and operational checks for the demo deployment
-
----
-
-## 10. What not to do in v1
-
-To keep the project finishable and credible, v1 should **not** include:
-
-- full frontend complexity
-- multi-agent collaboration hype
-- vector database / RAG unless clearly needed
-- OCR-heavy pipelines unless required
-- too many third-party integrations
-- complicated recommendation engines before the core workflow is stable
-
-v1 wins by being **focused, deployable, and explainable**.
-
----
-
-## 11. Long-term evolution
-
-Possible future directions:
-
-- GitHub profile analysis
-- study plan sync with calendar tools
-- weekly progress reports by email
-- project portfolio scoring
-- deeper interview simulation
-- recruiter-facing candidate readiness reports
-- role-specific plans (backend / data / cloud / AI engineer)
-
----
-
-## 12. Project principle
-
-OfferPath is built around one principle:
-
-> Do not just help users look stronger on paper. Help them become stronger in reality.
-
-That is the real value of the project, and that is what keeps the idea meaningful.
-
----
-
-## 13. Local development
-
-The repository currently contains the backend MVP:
-
-- FastAPI application
-- local SQLite persistence
-- user registration and login
-- authenticated resume upload
-- JD submission
-- analysis job creation
-- worker-based agentic analysis workflow with a mock provider
-- job status and result API
-- job attempt tracking and worker timing fields
-- workflow, prompt, provider, and intermediate-step tracking
-
-### Run the backend locally
+The main career agent now lives under:
+
+```text
+backend/app/services/career_agent/
+```
+
+The key entrypoint is:
+
+```python
+run_career_agent_preview(db, job_id, user_feedback=None)
+```
+
+This preview demonstrates a bounded ReAct loop:
+
+```text
+Reason -> Act -> Observation -> ... -> validated final output
+```
+
+The ReAct agent is the intended iterative product flow. It can:
+
+- read the resume and target JD
+- reuse previous successful analysis context
+- use external market/JD/GitHub observations inside the reasoning loop
+- generate and validate the structured roadmap
+- revise the roadmap from user feedback
+- search GitHub reference projects for roadmap tasks
+- draft a Notion learning note
+- draft a Gmail progress update
+- keep all writes draft-only unless the user explicitly confirms
+
+Current agent structure:
+
+```text
+career_agent/
+  __init__.py
+  tools.py              # safe internal tools for resume/JD/history
+  result_builder.py     # builds and validates AnalysisResult
+  mcp_adapters.py       # GitHub/Notion/Gmail adapter boundary
+  career_agent.py       # ReAct orchestration loop
+```
+
+The MCP adapter is currently deterministic and safe for tests. It does not call real GitHub, Notion, or Gmail yet. The boundary is ready for real MCP connectors later:
+
+```text
+github_mcp_search_reference_projects
+notion_mcp_draft_learning_note
+gmail_mcp_draft_progress_update
+```
+
+Safety rules:
+
+- GitHub is read/search oriented.
+- Notion is draft-only by default.
+- Gmail is draft-only by default.
+- No unrestricted database access is exposed to the agent.
+- No external publish/send should happen without explicit user confirmation.
+
+MCP and retrieval outputs are observations inside the ReAct loop, not just
+post-processing. They can shape the roadmap before the final validated result
+is returned.
+
+## RAG Plan
+
+OfferPath should use **Amazon Bedrock Managed Knowledge Base** as the RAG layer.
+
+The first RAG version should not use pgvector. Bedrock KB is the better MVP choice because it is fully managed and lets the project focus on retrieval strategy, multi-tenant filtering, and context orchestration.
+
+Target RAG sources:
+
+- multiple resumes
+- historical JDs
+- project notes
+- interview notes
+- learning notes
+- company/job-role documents
+- useful technical references
+
+Planned Bedrock KB design:
+
+```text
+S3 documents
+-> Bedrock Managed Knowledge Base
+-> metadata-filtered retrieval
+-> retrieved context
+-> ReAct career agent / AnalysisProvider
+```
+
+Important production details:
+
+- Add `user_id` metadata to documents/chunks.
+- Always filter retrieval by `user_id`.
+- Enable hybrid search where the Bedrock KB vector store supports it.
+- Report retrieval latency and error metrics to CloudWatch.
+
+Example retrieval filter:
+
+```python
+retrievalConfiguration={
+    "vectorSearchConfiguration": {
+        "numberOfResults": 5,
+        "overrideSearchType": "HYBRID",
+        "filter": {
+            "equals": {
+                "key": "user_id",
+                "value": str(user_id),
+            }
+        },
+    }
+}
+```
+
+This lets OfferPath tell a stronger architecture story:
+
+```text
+multi-tenant isolated RAG
+hybrid retrieval
+observable retrieval latency
+agentic tool orchestration
+structured output validation
+```
+
+## Backend Stack
+
+- FastAPI
+- SQLAlchemy
+- SQLite locally, PostgreSQL in Docker/AWS
+- Redis
+- S3-compatible resume storage boundary
+- Gemini provider
+- Mock provider for tests
+- Bedrock KB planned for RAG
+- ReAct career agent adapter boundary for GitHub, Notion, and Gmail
+
+## Local Setup
+
+Create the backend environment:
 
 ```bash
 cd backend
@@ -344,16 +209,37 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 cp .env.example .env
-uvicorn app.main:app --reload
 ```
 
-Open the API docs at:
+Start Redis:
+
+```bash
+docker compose up redis
+```
+
+Start the API:
+
+```bash
+cd backend
+source .venv/bin/activate
+PYTHONPATH=. uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open Swagger:
 
 ```text
 http://127.0.0.1:8000/docs
 ```
 
-### Run tests
+Run the worker once:
+
+```bash
+cd backend
+source .venv/bin/activate
+PYTHONPATH=. python -m worker.main --once
+```
+
+Run tests:
 
 ```bash
 cd backend
@@ -361,184 +247,15 @@ source .venv/bin/activate
 pytest
 ```
 
-### Run the local worker
+## Demo Flow
 
-Week 2 introduces a worker entrypoint. The API creates queued jobs, and the
-worker processes them:
-
-```bash
-cd backend
-source .venv/bin/activate
-python -m worker.main --once
-```
-
-### Run with Docker Compose
-
-Week 3 adds a Docker Compose setup for local production-like services:
-
-```bash
-docker compose up --build
-```
-
-This starts:
-
-- FastAPI API on `http://127.0.0.1:8000`
-- worker service
-- PostgreSQL on port `5432`
-- Redis on port `6379`
-
-The Docker environment uses:
-
-```text
-backend/.env.docker.example
-```
-
-The API docs are still available at:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-### Environment profiles
-
-OfferPath currently supports three environment shapes:
-
-| Environment | Database | Redis | Typical command |
-| --- | --- | --- | --- |
-| Local development | SQLite file | Local Redis URL configured but not required yet | `uvicorn app.main:app --reload` |
-| Docker development | PostgreSQL container | Redis container | `docker compose up --build` |
-| Production-like AWS | RDS PostgreSQL | ElastiCache Redis | future deployment step |
-
-The active database is controlled by:
-
-```text
-OFFERPATH_DATABASE_URL
-```
-
-Local default:
-
-```text
-sqlite:///./offerpath.db
-```
-
-Docker default:
-
-```text
-postgresql+psycopg://offerpath:offerpath@postgres:5432/offerpath
-```
-
-Redis is configured through:
-
-```text
-OFFERPATH_REDIS_URL
-```
-
-Redis is included in Docker Compose. The application uses Redis through a small client wrapper that currently supports:
-
-- readiness checks
-- rate limiting for AI analysis job creation
-- idempotency keys for `POST /jobs`
-- live job status/progress cache
-- owner-safe distributed locks for worker execution
-
-Redis is temporary operational storage only. PostgreSQL/SQLite remains the
-source of truth for users, resumes, job state, `result_json`,
-`intermediate_json`, and metadata.
-
-Redis-backed reliability features:
-
-- rate limiting protects AI provider cost from repeated job creation
-- `Idempotency-Key` prevents duplicate jobs when a client retries `POST /jobs`
-- live status cache exposes progress such as `parsing_resume` and
-  `running_analysis_provider`
-- distributed worker lock prevents duplicate execution when multiple workers
-  compete for the same analysis job
-
-Manual Redis test flow:
-
-```bash
-redis-server
-```
-
-Then start the API:
-
-```bash
-cd backend
-source .venv/bin/activate
-PYTHONPATH=. uvicorn app.main:app --reload
-```
-
-Create a job with:
-
-```text
-Idempotency-Key: test-key-123
-```
-
-Send the same `POST /jobs` request again with the same header. The response
-should return the same job id instead of creating a duplicate. Run the worker:
-
-```bash
-PYTHONPATH=. python -m worker.main --once
-```
-
-Then check:
-
-```text
-GET /jobs/{job_id}
-```
-
-The response keeps the existing fields and adds `live_status` when Redis has
-progress data.
-
-AI analysis is configured through:
-
-```text
-OFFERPATH_AI_PROVIDER
-OFFERPATH_GEMINI_MODEL
-OFFERPATH_GEMINI_API_KEY
-```
-
-The default provider is `mock`, which keeps local development and CI stable.
-Set `OFFERPATH_AI_PROVIDER=gemini` and provide `OFFERPATH_GEMINI_API_KEY` to
-call Gemini through the pluggable provider interface. Do not commit real API
-keys to `.env` examples or source control.
-
-The Week 4 analysis workflow records:
-
-- provider name
-- workflow version
-- prompt version
-- intermediate steps
-- validated structured result JSON
-
-### Real demo flow: PDF resume to AI SRE action plan
-
-This flow demonstrates the real OfferPath product goal: upload a PDF resume,
-submit a target JD, run the async worker, and read a structured career gap
-analysis.
-
-Start Redis and the API locally:
-
-```bash
-docker compose up redis
-cd backend
-source .venv/bin/activate
-PYTHONPATH=. uvicorn app.main:app --reload
-```
-
-Open the API docs:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-Use Swagger or curl to run the flow:
-
-1. Register a user with `POST /auth/register`.
-2. Login with `POST /auth/login` and copy the `access_token`.
-3. Authorize Swagger with `Bearer <access_token>`.
-4. Upload a text-based PDF resume with `POST /resumes`.
-5. Create an AI SRE analysis job with `POST /jobs`.
+1. `POST /auth/register`
+2. `POST /auth/login`
+3. Authorize Swagger with `Bearer <access_token>`
+4. `POST /resumes` with a text-based PDF or TXT resume
+5. `POST /jobs` with a target JD
+6. Run the worker
+7. `GET /jobs/{job_id}`
 
 Example AI SRE job body:
 
@@ -550,269 +267,81 @@ Example AI SRE job body:
 }
 ```
 
-Run the worker once:
-
-```bash
-cd backend
-source .venv/bin/activate
-PYTHONPATH=. python -m worker.main --once
-```
-
-Then query the result:
-
-```text
-GET /jobs/{job_id}
-```
-
-Successful jobs return `status: "succeeded"` and a structured `result` with:
+Successful jobs return a structured result with:
 
 - `matched_skills`
 - prioritized `missing_skills`
-- `weak_skills` and `partially_matched_skills`
-- `evidence_from_resume` and `evidence_from_jd`
+- `weak_skills`
+- `partially_matched_skills`
+- `evidence_from_resume`
+- `evidence_from_jd`
 - `30_day_roadmap`
 - `project_tasks`
 - `interview_talking_points`
 - `resume_improvement_suggestions`
 
-The worker also saves useful `intermediate_steps` for:
+## Configuration
 
-- `resume_understanding`
-- `jd_understanding`
-- `skill_gap_comparison`
-- `roadmap_generation`
-- `project_recommendation`
-- `interview_preparation`
-- `final_result_validation`
-
-To use the stable local mock provider:
+Local secrets belong in:
 
 ```text
-OFFERPATH_AI_PROVIDER=mock
+backend/.env
 ```
 
-To use Gemini for real AI output, set these values in your local
-`backend/.env` only:
+Do not commit `.env`.
 
-```text
-OFFERPATH_AI_PROVIDER=gemini
+AI provider:
+
+```env
+OFFERPATH_AI_PROVIDER=mock
 OFFERPATH_GEMINI_MODEL=gemini-2.5-flash
+# OFFERPATH_GEMINI_API_KEY=your-local-secret
+```
+
+Switch to Gemini:
+
+```env
+OFFERPATH_AI_PROVIDER=gemini
 OFFERPATH_GEMINI_API_KEY=your-local-secret
 ```
 
-Do not hardcode API keys in Python code. Do not commit real keys to
-`.env.example`, `.env.docker.example`, README examples, or source control.
-The example env files should contain placeholders only. Local secrets belong in
-`backend/.env`.
+Storage:
 
-### S3-backed resume storage
-
-Resume files are stored outside the database. The upload API sends the original
-PDF/TXT bytes to S3 through the storage service, then stores only metadata in
-PostgreSQL/SQLite:
-
-- original filename
-- storage backend
-- S3 key in `stored_path`
-- content type
-- file size
-- owner and timestamps
-
-Storage is configured through:
-
-```text
-STORAGE_BACKEND=s3
-AWS_REGION=ap-southeast-2
-S3_BUCKET_NAME=your-bucket-name
-S3_RESUME_PREFIX=resumes
+```env
+STORAGE_BACKEND=local
+OFFERPATH_UPLOAD_DIR=./storage/resumes
 ```
 
-For local personal AWS credentials, the app also supports:
+Future Bedrock KB RAG:
 
-```text
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
+```env
+OFFERPATH_RAG_PROVIDER=bedrock_kb
+OFFERPATH_BEDROCK_KB_ID=your-kb-id
+OFFERPATH_BEDROCK_MODEL_ARN=your-model-arn
+OFFERPATH_AWS_REGION=ap-southeast-2
+OFFERPATH_RAG_SEARCH_TYPE=HYBRID
+OFFERPATH_RAG_NUMBER_OF_RESULTS=5
 ```
 
-Production deployments should prefer EC2/ECS IAM roles rather than committed or
-hard-coded credentials. Tests use the local storage backend and do not require a
-real AWS bucket.
+## Reliability Features
 
-The worker analysis flow is now:
+Redis is used for:
 
-```text
-AnalysisJob.resume.stored_path
--> S3StorageService.read_file()
--> ResumeParser.extract_resume_text()
--> mock/Gemini provider.run(resume_text, job_description)
--> Pydantic validation
--> result_json / intermediate_json saved in the database
-```
+- rate limiting
+- idempotency keys
+- live job status
+- worker locks
 
-The parser supports `.txt` and `.pdf` resumes. Gemini and mock providers still
-receive plain `resume_text`; they do not read S3 keys or parse PDFs directly.
-This keeps the design ready for future agent tools such as
-`read_resume_tool(job_id)` while keeping the production path simple.
+The database remains the source of truth for:
 
-### Experimental LangChain, LangGraph, and ReAct previews
+- users
+- resumes
+- jobs
+- results
+- intermediate steps
 
-The default OfferPath workflow is still provider-based and production-oriented:
+## Project Principle
 
-```text
-worker -> get_analysis_provider() -> mock/Gemini provider -> result_json
-```
+OfferPath should not only help users look stronger on paper.
 
-That path is the only workflow used by `POST /jobs` and the worker by default.
-It validates `AnalysisResult` and saves `result_json` / `intermediate_json`.
-
-Isolated experimental previews live under:
-
-```text
-backend/app/services/agent_experimental/
-```
-
-The LangGraph-style preview entrypoint is:
-
-```python
-run_langchain_analysis_preview(db, job_id)
-```
-
-It demonstrates stateful graph orchestration with input loading, previous
-analysis context loading, a mockable LLM step, and final Pydantic validation.
-
-The ReAct-style preview entrypoint is:
-
-```python
-run_react_analysis_preview(db, job_id)
-```
-
-It demonstrates a bounded Reason -> Act -> Observation loop with safe tool
-selection, previous-analysis context reuse, observations, and final structured
-output validation.
-
-Both previews compare tool-calling and context reuse ideas without changing the
-database schema and without overwriting production `result_json` by default.
-They share the existing `AnalysisJob`, `Resume`, `AnalysisResult`, and
-`AnalysisWorkflowOutput` models.
-
-The experimental tools are deterministic and intentionally narrow:
-
-- `get_resume_text_tool`
-- `get_job_description_tool`
-- `get_recent_user_analysis_context_tool`
-- `build_structured_result_tool`
-
-The context tool only summarizes previous successful jobs for the same user:
-
-- previous missing skills
-- previous roadmap items
-- previous project suggestions
-
-They do not expose unrestricted database access to the LLM. If LangGraph is
-installed, the LangGraph preview can run through a small `StateGraph`;
-otherwise it uses the same deterministic sequential fallback so local tests
-remain stable. The ReAct preview is deterministic by default and does not
-require a real LLM call in tests.
-
-Optional experimental dependencies:
-
-```bash
-python -m pip install langchain-core langgraph
-```
-
-Readiness endpoint:
-
-```text
-GET /health/ready
-```
-
-### Logging
-
-API and worker logs are emitted through Python logging with JSON event payloads. The log level is controlled by:
-
-```text
-OFFERPATH_LOG_LEVEL
-```
-
-Example worker log event:
-
-```json
-{"env": "docker", "event": "analysis_job.succeeded", "attempt_count": 1, "job_id": 42, "missing_skill_count": 5, "status": "succeeded"}
-```
-
-Important event names include:
-
-- `api.startup`
-- `api.shutdown`
-- `analysis_job.enqueued`
-- `worker.started`
-- `worker.job_claimed`
-- `analysis_job.started`
-- `analysis_job.succeeded`
-- `analysis_job.failed`
-
-### Week 3 verification checklist
-
-Run the local test suite:
-
-```bash
-cd backend
-source .venv/bin/activate
-pytest
-```
-
-Validate the Docker Compose file:
-
-```bash
-docker compose config --quiet
-```
-
-Start the production-like local stack:
-
-```bash
-docker compose up --build
-```
-
-Check the API:
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-Check readiness:
-
-```text
-GET http://127.0.0.1:8000/health/ready
-```
-
-Expected Docker readiness:
-
-```json
-{
-  "status": "ok",
-  "database": "ok",
-  "redis": "ok"
-}
-```
-
-Expected local readiness without Redis running:
-
-```json
-{
-  "status": "ok",
-  "database": "ok",
-  "redis": "unavailable"
-}
-```
-
-### Week 1 API flow
-
-1. `POST /auth/register`
-2. `POST /auth/login`
-3. `POST /resumes`
-4. `POST /jobs`
-5. `GET /jobs/{job_id}`
-6. `python -m worker.main --once`
-7. `GET /jobs/{job_id}`
-
-The analysis logic is intentionally mocked so the full product flow works locally before adding real cloud queue, cloud storage, and AI provider integrations.
+It should help them become stronger in reality by turning career gaps into concrete learning tasks, proof projects, reference examples, and follow-up actions.

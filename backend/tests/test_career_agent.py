@@ -5,14 +5,8 @@ from uuid import uuid4
 from app.core.config import get_settings
 from app.db import SessionLocal, init_db
 from app.models import AnalysisJob, JobStatus, Resume, User
-from app.services.agent_experimental.tools import get_recent_user_analysis_context_tool
-from app.services.agent_experimental.react_preview import run_react_analysis_preview
-from app.services.agent_experimental.workflow import run_langchain_analysis_preview
-
-
-class MockPreviewLLM:
-    def invoke(self, prompt: str) -> dict:
-        return {"summary_hint": "mocked LangChain preview", "prompt_seen": bool(prompt)}
+from app.services.career_agent.tools import get_recent_user_analysis_context_tool
+from app.services.career_agent.career_agent import run_career_agent_preview
 
 
 def test_context_summary_from_previous_jobs(tmp_path: Path, monkeypatch) -> None:
@@ -47,46 +41,7 @@ def test_context_summary_from_previous_jobs(tmp_path: Path, monkeypatch) -> None
         db.close()
 
 
-def test_langchain_preview_returns_valid_workflow_output_with_mocked_llm(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _configure_local_test_env(tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        "app.services.agent_experimental.workflow.create_preview_llm",
-        lambda: MockPreviewLLM(),
-    )
-    db = SessionLocal()
-    try:
-        user = _create_user(db)
-        resume = _create_resume(db, user, tmp_path, "Python FastAPI Docker testing")
-        previous_job = _create_job(db, user, resume, status=JobStatus.succeeded)
-        previous_job.result_json = json.dumps(
-            {
-                "missing_skills": [{"skill": "redis", "priority": "P1", "reason": "Required"}],
-                "roadmap": [{"priority": "P1", "skill": "redis", "task": "Cache job status"}],
-                "project_suggestions": ["Add Redis-backed idempotency"],
-            }
-        )
-        current_job = _create_job(db, user, resume)
-        db.commit()
-
-        original_result_json = current_job.result_json
-        output = run_langchain_analysis_preview(db, current_job.id)
-        db.refresh(current_job)
-
-        assert output.ai_provider == "langchain-experimental"
-        assert output.workflow_version == "langchain-preview-v0"
-        assert output.result.summary
-        assert output.result.model_dump(by_alias=True)["30_day_roadmap"]
-        assert output.intermediate_steps["final_result_validation"]["writes_result_json"] is False
-        assert output.intermediate_steps["recent_user_analysis_context"]["previous_missing_skills"] == ["redis"]
-        assert current_job.result_json == original_result_json
-    finally:
-        db.close()
-
-
-def test_react_preview_returns_valid_workflow_output(tmp_path: Path, monkeypatch) -> None:
+def test_career_agent_returns_valid_workflow_output(tmp_path: Path, monkeypatch) -> None:
     _configure_local_test_env(tmp_path, monkeypatch)
     db = SessionLocal()
     try:
@@ -96,11 +51,12 @@ def test_react_preview_returns_valid_workflow_output(tmp_path: Path, monkeypatch
         db.commit()
 
         original_result_json = current_job.result_json
-        output = run_react_analysis_preview(db, current_job.id)
+        output = run_career_agent_preview(db, current_job.id)
         db.refresh(current_job)
 
-        assert output.ai_provider == "react-experimental"
-        assert output.workflow_version == "react-preview-v0"
+        assert output.ai_provider == "career-agent"
+        assert output.workflow_version == "career-agent-react-v0"
+        assert output.prompt_version == "career-agent-mcp-v0"
         assert output.result.summary
         assert output.result.model_dump(by_alias=True)["30_day_roadmap"]
         assert output.intermediate_steps["final_result_validation"]["validated_schema"] == "AnalysisResult"
@@ -109,7 +65,7 @@ def test_react_preview_returns_valid_workflow_output(tmp_path: Path, monkeypatch
         db.close()
 
 
-def test_react_preview_records_tool_calls_and_observations(tmp_path: Path, monkeypatch) -> None:
+def test_career_agent_records_tool_calls_and_observations(tmp_path: Path, monkeypatch) -> None:
     _configure_local_test_env(tmp_path, monkeypatch)
     db = SessionLocal()
     try:
@@ -118,7 +74,7 @@ def test_react_preview_records_tool_calls_and_observations(tmp_path: Path, monke
         current_job = _create_job(db, user, resume)
         db.commit()
 
-        output = run_react_analysis_preview(db, current_job.id)
+        output = run_career_agent_preview(db, current_job.id)
 
         tool_calls = output.intermediate_steps["tool_calls"]
         observations = output.intermediate_steps["observations"]
@@ -127,20 +83,93 @@ def test_react_preview_records_tool_calls_and_observations(tmp_path: Path, monke
             "get_job_description_tool",
             "get_recent_user_analysis_context_tool",
             "build_structured_result_tool",
+            "revise_roadmap_with_user_feedback_tool",
+            "github_mcp_search_reference_projects",
+            "notion_mcp_draft_learning_note",
+            "gmail_mcp_draft_progress_update",
         ]
         assert [call["action"] for call in tool_calls] == [
             "get_resume_text_tool",
             "get_job_description_tool",
             "get_recent_user_analysis_context_tool",
             "build_structured_result_tool",
+            "revise_roadmap_with_user_feedback_tool",
+            "github_mcp_search_reference_projects",
+            "notion_mcp_draft_learning_note",
+            "gmail_mcp_draft_progress_update",
         ]
         assert len(observations) == len(tool_calls)
-        assert observations[-1]["observation"]["validated_schema"] == "AnalysisResult"
+        assert observations[3]["observation"]["validated_schema"] == "AnalysisResult"
+        assert observations[-1]["tool"] == "gmail_mcp_draft_progress_update"
     finally:
         db.close()
 
 
-def test_react_preview_uses_previous_successful_analysis_context(
+def test_career_agent_revises_roadmap_with_user_feedback(tmp_path: Path, monkeypatch) -> None:
+    _configure_local_test_env(tmp_path, monkeypatch)
+    db = SessionLocal()
+    try:
+        user = _create_user(db)
+        resume = _create_resume(db, user, tmp_path, "Python FastAPI Docker testing")
+        current_job = _create_job(db, user, resume)
+        db.commit()
+
+        feedback = "Make the roadmap focus less on AWS and more on AI agent engineering."
+        output = run_career_agent_preview(db, current_job.id, user_feedback=feedback)
+
+        feedback_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "revise_roadmap_with_user_feedback_tool"
+        )
+        assert output.intermediate_steps["feedback_used"] is True
+        assert feedback_observation["observation"]["feedback_used"] is True
+        assert feedback in output.result.summary
+        assert any(feedback in suggestion for suggestion in output.result.project_suggestions)
+    finally:
+        db.close()
+
+
+def test_career_agent_drafts_external_mcp_actions_without_publishing(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _configure_local_test_env(tmp_path, monkeypatch)
+    db = SessionLocal()
+    try:
+        user = _create_user(db)
+        resume = _create_resume(db, user, tmp_path, "Python FastAPI Docker testing")
+        current_job = _create_job(db, user, resume)
+        db.commit()
+
+        output = run_career_agent_preview(db, current_job.id)
+
+        github_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "github_mcp_search_reference_projects"
+        )
+        notion_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "notion_mcp_draft_learning_note"
+        )
+        gmail_observation = next(
+            observation
+            for observation in output.intermediate_steps["observations"]
+            if observation["tool"] == "gmail_mcp_draft_progress_update"
+        )
+
+        assert github_observation["observation"]["candidate_count"] >= 1
+        assert notion_observation["observation"]["published"] is False
+        assert gmail_observation["observation"]["sent"] is False
+        assert output.intermediate_steps["external_mcp_policy"]["notion"].startswith("draft only")
+        assert output.intermediate_steps["external_mcp_policy"]["gmail"].startswith("draft only")
+    finally:
+        db.close()
+
+
+def test_career_agent_uses_previous_successful_analysis_context(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -160,7 +189,7 @@ def test_react_preview_uses_previous_successful_analysis_context(
         current_job = _create_job(db, user, resume)
         db.commit()
 
-        output = run_react_analysis_preview(db, current_job.id)
+        output = run_career_agent_preview(db, current_job.id)
 
         assert output.intermediate_steps["previous_context_used"] is True
         context_observation = next(
