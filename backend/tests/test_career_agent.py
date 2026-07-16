@@ -9,7 +9,6 @@ from app.models import AnalysisJob, JobStatus, Resume, User
 from app.services.career_agent.planner import LLMReActPlanner, PlannerDecisionError, ReActAction
 from app.services.career_agent.tools import get_recent_user_analysis_context_tool
 from app.services.career_agent.career_agent import run_career_agent_preview
-from app.services.rag.retrieval_models import CareerRAGContext, RetrievedContextItem
 
 
 def test_context_summary_from_previous_jobs(tmp_path: Path, monkeypatch) -> None:
@@ -85,7 +84,6 @@ def test_career_agent_records_tool_calls_and_observations(tmp_path: Path, monkey
             "get_resume_text_tool",
             "get_job_description_tool",
             "get_recent_user_analysis_context_tool",
-            "retrieve_career_rag_context_tool",
             "build_structured_result_tool",
             "revise_roadmap_with_user_feedback_tool",
             "github_mcp_search_reference_projects",
@@ -224,39 +222,6 @@ def test_career_agent_can_use_injected_real_mcp_client(
         db.close()
 
 
-def test_career_agent_uses_rag_context_before_building_result(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _configure_local_test_env(tmp_path, monkeypatch)
-    db = SessionLocal()
-    try:
-        user = _create_user(db)
-        resume = _create_resume(db, user, tmp_path, "Python FastAPI Docker testing")
-        current_job = _create_job(db, user, resume)
-        db.commit()
-        retriever = FakeCareerContextRetriever()
-
-        output = run_career_agent_preview(db, current_job.id, rag_retriever=retriever)
-
-        rag_observation = next(
-            observation
-            for observation in output.intermediate_steps["observations"]
-            if observation["tool"] == "retrieve_career_rag_context_tool"
-        )
-        assert output.intermediate_steps["rag_runtime"] == "bedrock_kb"
-        assert output.intermediate_steps["rag_context_used"] is True
-        assert rag_observation["observation"]["metadata_filter"] == {
-            "equals": {"key": "user_id", "value": str(user.id)}
-        }
-        assert rag_observation["observation"]["search_type"] == "HYBRID"
-        assert rag_observation["observation"]["tuning"]["recommendations"]
-        assert retriever.calls[0]["user_id"] == user.id
-        assert "RAG context used" in output.result.summary
-    finally:
-        db.close()
-
-
 def test_career_agent_accepts_custom_dynamic_planner(tmp_path: Path, monkeypatch) -> None:
     _configure_local_test_env(tmp_path, monkeypatch)
     db = SessionLocal()
@@ -306,7 +271,6 @@ def test_career_agent_can_use_llm_react_planner_with_mocked_llm(tmp_path: Path, 
                 "get_resume_text_tool",
                 "get_job_description_tool",
                 "get_recent_user_analysis_context_tool",
-                "retrieve_career_rag_context_tool",
                 "build_structured_result_tool",
                 "revise_roadmap_with_user_feedback_tool",
                 "github_mcp_search_reference_projects",
@@ -346,8 +310,6 @@ def test_llm_react_planner_rejects_unsupported_tool() -> None:
                 "resume_text": "",
                 "job_description": "",
                 "user_context_loaded": False,
-                "rag_runtime": "disabled",
-                "rag_context_loaded": False,
                 "user_feedback": "",
                 "feedback_used": False,
                 "github_reference_projects": [],
@@ -434,30 +396,6 @@ class FakeMCPToolClient:
                 "sent": False,
             }
         raise AssertionError(f"Unexpected MCP server: {server}")
-
-
-class FakeCareerContextRetriever:
-    def __init__(self) -> None:
-        self.calls: list[dict[str, Any]] = []
-
-    def retrieve(self, *, query: str, user_id: int | str, number_of_results: int | None = None) -> CareerRAGContext:
-        self.calls.append({"query": query, "user_id": user_id, "number_of_results": number_of_results})
-        return CareerRAGContext(
-            query=query,
-            user_id=str(user_id),
-            metadata_filter={"equals": {"key": "user_id", "value": str(user_id)}},
-            search_type="HYBRID",
-            number_of_results=5,
-            latency_ms=42.0,
-            items=[
-                RetrievedContextItem(
-                    text="Previous market JDs emphasize AWS, Kubernetes, observability, and incident response.",
-                    source_uri="s3://offerpath-kb/user-notes/ai-sre.md",
-                    score=0.82,
-                    metadata={"user_id": str(user_id), "document_type": "market_jd"},
-                )
-            ],
-        )
 
 
 class FakeShortPlanner:

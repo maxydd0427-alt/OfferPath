@@ -1,45 +1,22 @@
 # OfferPath
 
-OfferPath is an agentic career growth backend that turns a resume and a target job description into a structured skill gap analysis, 30-day roadmap, proof-oriented project tasks, and interview preparation plan.
+OfferPath is an AI career-development app for computer science students and software job seekers. It turns a resume and target job description into a structured skill gap analysis, a 30-day roadmap, proof-oriented project tasks, interview preparation, and evidence-backed recommendations.
 
-The long-term product goal is not only to generate advice. OfferPath should help a user repeatedly improve toward a target role by combining:
-
-- resume and JD analysis
-- long-term personal career context
-- RAG over resumes, JDs, notes, projects, and interview records
-- ReAct-style career agent orchestration for market JD search, GitHub references, Notion notes, and Gmail drafts
-
-## Product Direction
-
-The core idea is:
+## Product Flow
 
 ```text
-Resume + Target JD
--> structured skill gap analysis
--> roadmap
--> user feedback revision
--> similar JD / market signal retrieval
--> GitHub reference projects
--> Notion learning notes
--> Gmail progress drafts
--> iterative improvement
+Resume PDF/TXT + Target Job Description
+-> AnalysisJob
+-> worker
+-> optional RAG V2 evidence retrieval
+-> AnalysisProvider or career agent
+-> Pydantic validated AnalysisResult
+-> result_json + intermediate_json
 ```
 
-For computer science students and software job seekers, OfferPath should answer:
-
-- Which skills does this role require?
-- Which skills does the resume already prove?
-- Which skills are missing or weak?
-- What should the user learn in the next 30 days?
-- What project can prove those skills?
-- What do similar JDs ask for in the market?
-- Which GitHub projects are useful references?
-- What should be saved as learning notes?
-- What progress update or outreach email should be drafted?
+The backend is FastAPI-based and includes auth, resume upload, async jobs, Redis-backed idempotency/status/locks, PostgreSQL or SQLite support, and mock/Gemini/OpenAI analysis providers. The React frontend demo calls the real FastAPI endpoints and includes a local demo-result fallback for presentation.
 
 ## Frontend Demo
-
-OfferPath includes a lightweight Vite + React + TypeScript frontend demo under `frontend/`.
 
 ```bash
 cd frontend
@@ -47,498 +24,203 @@ npm install
 npm run dev
 ```
 
-The backend should be running at `http://localhost:8000`. To use another API URL:
+The API defaults to `http://localhost:8000`. Override it with:
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
-The frontend connects to the real FastAPI routes for auth, resume upload, job creation, polling, and result rendering. The “View Demo Result” button uses local mock data only as a presentation fallback.
+The frontend uses real routes for auth, resume upload, job creation, polling, live status, and result rendering. Demo mode uses local mock data only.
 
-## Current Architecture
-
-The stable backend path is still provider-based:
-
-```text
-FastAPI
--> AnalysisJob
--> worker
--> AnalysisProvider
--> AnalysisResult
--> result_json / intermediate_json
-```
-
-This path is intentionally boring and reliable. It supports:
-
-- user registration and login
-- PDF/TXT resume upload
-- target JD submission
-- async job creation
-- worker processing
-- mock provider for local tests
-- Gemini provider for real AI output
-- structured Pydantic validation before saving results
-- Redis-backed rate limiting, idempotency, live status, and worker locks
-
-By default the worker still runs the provider workflow. For the agentic product
-path, enable the career agent workflow:
-
-```bash
-OFFERPATH_ANALYSIS_WORKFLOW=career_agent
-OFFERPATH_AGENT_PLANNER=llm
-```
-
-Then the async path becomes:
-
-```text
-POST /jobs
--> worker
--> ReAct career agent
--> optional Bedrock KB RAG
--> MCP adapter observations
--> result_json / intermediate_json
-```
-
-## ReAct Career Agent
-
-The main career agent now lives under:
-
-```text
-backend/app/services/career_agent/
-```
-
-The key entrypoint is:
-
-```python
-run_career_agent_preview(db, job_id, user_feedback=None, mcp_client=None, rag_retriever=None, planner=None)
-```
-
-This preview demonstrates a bounded dynamic ReAct loop:
-
-```text
-Planner reason -> Act -> Observation -> Planner reason -> ... -> validated final output
-```
-
-The agent no longer executes a fully fixed action list. It supports two planners:
-
-- `HeuristicAgentPlanner`: deterministic state-based planning for tests and safe local runs.
-- `LLMReActPlanner`: Gemini-backed planner that chooses the next tool from state and observations.
-
-The planner chooses the next tool from current state:
-
-- missing resume text -> read resume
-- missing JD -> read JD
-- missing history -> read previous analysis context
-- RAG configured -> retrieve user-scoped Bedrock KB context
-- no structured result -> build and validate result
-- user feedback exists -> revise roadmap
-- missing project references -> search GitHub
-- missing learning note -> draft Notion note
-- missing progress update -> draft Gmail email
-
-The LLM planner returns only a JSON decision:
-
-```json
-{
-  "thought": "I need user-scoped career memory before building the roadmap.",
-  "action": "retrieve_career_rag_context_tool"
-}
-```
-
-The backend validates the action against the allowlist before execution. Tool
-execution remains bounded by `REACT_MAX_STEPS`, and write-capable tools remain
-draft-only.
-
-To use the LLM planner locally:
-
-```bash
-OFFERPATH_AGENT_PLANNER=llm
-OFFERPATH_AI_PROVIDER=openai
-OFFERPATH_OPENAI_MODEL=gpt-4o-mini
-OFFERPATH_OPENAI_API_KEY=your-local-key
-```
-
-The ReAct agent is the intended iterative product flow. It can:
-
-- read the resume and target JD
-- reuse previous successful analysis context
-- use external market/JD/GitHub observations inside the reasoning loop
-- generate and validate the structured roadmap
-- revise the roadmap from user feedback
-- search GitHub reference projects for roadmap tasks
-- draft a Notion learning note
-- draft a Gmail progress update
-- keep all writes draft-only unless the user explicitly confirms
-
-Current agent structure:
-
-```text
-career_agent/
-  __init__.py
-  planner.py           # heuristic and LLM ReAct planners
-  tools.py              # safe internal tools for resume/JD/history
-  structured_result_builder.py  # builds and validates AnalysisResult
-  mcp_adapters.py       # GitHub/Notion/Gmail adapter boundary
-  career_agent.py       # ReAct orchestration loop
-```
-
-The MCP adapter now has two modes:
-
-- deterministic fallback for tests and local preview
-- injected real MCP client for GitHub, Notion, and Gmail tools
-
-The backend does not directly depend on Codex/IDE connectors. A deployed
-FastAPI process must pass its own MCP runtime client, or an adapter around the
-official GitHub/Notion/Gmail APIs. This keeps the career agent clean and avoids
-leaking unrestricted external access into the ReAct loop.
-
-The external tool actions are:
-
-```text
-github_mcp_search_reference_projects
-notion_mcp_draft_learning_note
-gmail_mcp_draft_progress_update
-```
-
-The injected MCP client boundary is intentionally small:
-
-```python
-class MCPToolClient:
-    def call_tool(self, server: str, tool_name: str, arguments: dict) -> object:
-        ...
-```
-
-This lets the product replace the deterministic fallback with real MCP servers
-without changing the agent loop.
-
-Safety rules:
-
-- GitHub is read/search oriented.
-- Notion is draft-only by default.
-- Gmail is draft-only by default.
-- No unrestricted database access is exposed to the agent.
-- No external publish/send should happen without explicit user confirmation.
-
-MCP and retrieval outputs are observations inside the ReAct loop, not just
-post-processing. They can shape the roadmap before the final validated result
-is returned.
-
-## Bedrock KB RAG
-
-OfferPath should use **Amazon Bedrock Managed Knowledge Base** as the RAG layer.
-
-The first RAG version should not use pgvector. Bedrock KB is the better MVP choice because it is fully managed and lets the project focus on retrieval strategy, multi-tenant filtering, and context orchestration.
-
-Target RAG sources:
-
-- multiple resumes
-- historical JDs
-- project notes
-- interview notes
-- learning notes
-- company/job-role documents
-- useful technical references
-
-Current backend design:
-
-```text
-S3 documents
--> Bedrock Managed Knowledge Base
--> metadata-filtered retrieval
--> retrieved context
--> ReAct career agent observation
--> structured roadmap validation
-```
-
-The code entrypoints are:
-
-```text
-backend/app/services/rag/bedrock_kb_client.py
-backend/app/services/rag/career_context_retriever.py
-retrieve_career_rag_context_tool
-```
-
-The ReAct career agent calls retrieval before building the structured result,
-so RAG can influence the roadmap instead of appearing as a post-processing
-appendix.
-
-Important production details:
-
-- Add `user_id` metadata to documents/chunks.
-- Always filter retrieval by `user_id`.
-- Enable hybrid search where the Bedrock KB vector store supports it.
-- Report retrieval latency, empty retrievals, item counts, errors, and top scores to CloudWatch.
-- Generate a tuning report after each retrieval observation.
-
-Example retrieval filter:
-
-```python
-retrievalConfiguration={
-    "vectorSearchConfiguration": {
-        "numberOfResults": 5,
-        "overrideSearchType": "HYBRID",
-        "filter": {
-            "equals": {
-                "key": "user_id",
-                "value": str(user_id),
-            }
-        },
-    }
-}
-```
-
-This lets OfferPath tell a stronger architecture story:
-
-```text
-multi-tenant isolated RAG
-hybrid retrieval
-observable retrieval latency
-agentic tool orchestration
-structured output validation
-```
-
-Environment variables:
-
-```bash
-OFFERPATH_ANALYSIS_WORKFLOW=career_agent
-OFFERPATH_AGENT_PLANNER=llm
-OFFERPATH_BEDROCK_KB_ID=your-knowledge-base-id
-OFFERPATH_AWS_REGION=us-east-1
-OFFERPATH_BEDROCK_KB_SEARCH_TYPE=HYBRID
-OFFERPATH_BEDROCK_KB_NUMBER_OF_RESULTS=5
-OFFERPATH_RAG_METRICS_ENABLED=true
-```
-
-AWS setup checklist:
-
-1. Create an S3 bucket for RAG documents.
-2. Upload resumes, JDs, project notes, learning notes, and interview notes.
-3. Attach metadata to documents/chunks, especially `user_id`.
-4. Create a Bedrock Knowledge Base with Titan Embeddings v2 or another approved embedding model.
-5. Sync the data source.
-6. Run backend retrieval with the enforced `user_id` filter.
-7. Check CloudWatch custom metrics under `OfferPath/RAG`.
-
-RAG tuning loop:
-
-```text
-CloudWatch metrics
--> latency / empty retrieval / retrieved item count / top score
--> RAG tuning report
--> adjust retrieval settings, metadata, chunking, sync, or caching
--> rerun evaluation
-```
-
-Useful signals:
-
-- High `RetrievalLatency`: check P95, reduce `numberOfResults`, add caching, and verify app/KB region.
-- High `EmptyRetrievals`: verify S3 sync, `user_id` metadata, chunking, and query construction.
-- Low `RetrievedItems`: add more user notes/JDs or increase `numberOfResults`.
-- Low `TopResultScore`: improve chunk quality and add metadata like `document_type` and `target_role`.
-- Missing exact terms like `AWS` or `Kubernetes`: keep `HYBRID` search enabled.
-
-## Next Production Work
-
-These are the next six production hardening items:
-
-1. Connect real Bedrock KB RAG
-   - Create the AWS Knowledge Base.
-   - Upload S3 documents with `user_id` metadata.
-   - Sync and verify filtered HYBRID retrieval.
-   - Build a CloudWatch dashboard for retrieval quality and latency.
-
-2. Connect real MCP runtime
-   - Replace deterministic GitHub/Notion/Gmail fallback with backend-owned MCP clients or official API adapters.
-   - Keep GitHub read/search oriented.
-   - Keep Notion and Gmail draft-only until explicit user confirmation.
-
-3. Harden the LLM planner
-   - Add retry for invalid planner JSON.
-   - Add repeated-action guard.
-   - Add tool failure recovery.
-   - Track planner latency, token cost, and decision errors.
-
-4. Persist resumable agent state
-   - Store each tool call and observation.
-   - Resume from the last successful step after failure.
-   - Allow user feedback to continue an existing roadmap session.
-
-5. Add evaluation
-   - Test tenant isolation for RAG filters.
-   - Measure retrieval recall and empty retrieval rate.
-   - Check whether roadmap items cite retrieved context.
-   - Evaluate GitHub reference relevance and planner tool choices.
-
-6. Add user confirmation flows
-   - Let users approve Notion note publishing.
-   - Let users approve Gmail draft sending.
-   - Keep all write actions auditable in intermediate steps.
-
-## Backend Stack
-
-- FastAPI
-- SQLAlchemy
-- SQLite locally, PostgreSQL in Docker/AWS
-- Redis
-- S3-compatible resume storage boundary
-- Gemini provider
-- Mock provider for tests
-- Bedrock KB RAG boundary with metadata filtering, hybrid search, and CloudWatch metrics
-- ReAct career agent adapter boundary for GitHub, Notion, and Gmail
-
-## Local Setup
-
-Create the backend environment:
+## Backend Setup
 
 ```bash
 cd backend
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Start Redis:
-
-```bash
-docker compose up redis
-```
-
-Start the API:
+For local SQLite development:
 
 ```bash
 cd backend
-source .venv/bin/activate
-PYTHONPATH=. uvicorn app.main:app --host 127.0.0.1 --port 8000
+OFFERPATH_STORAGE_BACKEND=local OFFERPATH_AI_PROVIDER=mock .venv/bin/uvicorn app.main:app --reload --port 8000
 ```
 
-Open Swagger:
+For Docker dependencies:
+
+```bash
+docker compose up -d postgres redis
+cd backend
+alembic upgrade head
+```
+
+Start API and worker:
+
+```bash
+cd backend
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+```bash
+cd backend
+.venv/bin/python -m worker.main --poll-interval-seconds 5
+```
+
+## RAG V2 Architecture
+
+OfferPath RAG V2 lives under `backend/app/rag_v2/`.
+
+Implemented functionality:
+
+- PostgreSQL + pgvector storage for embeddings
+- PostgreSQL full-text search with `websearch_to_tsquery` and `ts_rank_cd`
+- Reciprocal Rank Fusion for hybrid vector/keyword retrieval
+- Gemini embeddings with deterministic `FakeEmbedder` fallback
+- LLM reranking with deterministic score-only fallback
+- Tenant-isolated retrieval using `owner_id` filters at query time
+- Evidence citations (`C1`, `C2`, `C3`, ...)
+- Retrieval traces in `rag_runs`
+- Offline Recall@K, MRR, empty retrieval, latency, and tenant-isolation evaluation
+
+The bundled evaluation corpus contains controlled synthetic and user-authored demo data.
+
+### RAG V2 Flow
 
 ```text
-http://127.0.0.1:8000/docs
+Document text or PDF
+-> parser
+-> section-aware chunker
+-> Gemini or fake embeddings
+-> rag_documents / rag_chunks
+-> vector search + full-text search
+-> Reciprocal Rank Fusion
+-> reranker with fallback
+-> bounded evidence context with citations
+-> analysis provider prompt
+-> intermediate_json["rag_v2"]
 ```
 
-Run the worker once:
+### RAG V2 Environment
+
+Defaults are shown below:
+
+```bash
+OFFERPATH_RAG_V2_ENABLED=true
+OFFERPATH_RAG_EMBEDDING_MODEL=gemini-embedding-001
+OFFERPATH_RAG_EMBEDDING_DIMENSION=768
+OFFERPATH_RAG_EMBEDDER_MODE=auto
+OFFERPATH_RAG_CHUNK_SIZE_CHARS=1400
+OFFERPATH_RAG_CHUNK_OVERLAP_CHARS=180
+OFFERPATH_RAG_MINIMUM_CHUNK_CHARS=120
+OFFERPATH_RAG_VECTOR_LIMIT=20
+OFFERPATH_RAG_KEYWORD_LIMIT=20
+OFFERPATH_RAG_HYBRID_LIMIT=15
+OFFERPATH_RAG_FINAL_LIMIT=6
+OFFERPATH_RAG_RRF_K=60
+OFFERPATH_RAG_MAX_CONTEXT_CHARS=12000
+OFFERPATH_RAG_PIPELINE_VERSION=rag-v2
+OFFERPATH_RAG_RERANKER_ENABLED=true
+OFFERPATH_RAG_UPLOAD_MAX_BYTES=10485760
+```
+
+Use `OFFERPATH_RAG_EMBEDDER_MODE=fake` for deterministic local development without Gemini credentials. Production Gemini embedding requires `OFFERPATH_GEMINI_API_KEY`; do not commit `.env`.
+
+### RAG API
+
+Authenticated routes:
+
+- `POST /rag/documents/text`
+- `POST /rag/documents/upload`
+- `GET /rag/documents`
+- `GET /rag/documents/{id}`
+- `DELETE /rag/documents/{id}`
+- `POST /rag/documents/{id}/reingest`
+- `POST /rag/search`
+
+Owner IDs come from the authenticated user. Callers cannot impersonate another user.
+
+### Seed Demo Corpus
 
 ```bash
 cd backend
-source .venv/bin/activate
-PYTHONPATH=. python -m worker.main --once
+OFFERPATH_RAG_EMBEDDER_MODE=fake .venv/bin/python scripts/seed_rag_demo.py
 ```
 
-Run tests:
+The seed script is idempotent by content hash.
+
+### Offline Evaluation
 
 ```bash
 cd backend
-source .venv/bin/activate
-pytest
+OFFERPATH_RAG_EMBEDDER_MODE=fake .venv/bin/python scripts/evaluate_rag.py
 ```
 
-## Demo Flow
+Optional JSON output:
 
-1. `POST /auth/register`
-2. `POST /auth/login`
-3. Authorize Swagger with `Bearer <access_token>`
-4. `POST /resumes` with a text-based PDF or TXT resume
-5. `POST /jobs` with a target JD
-6. Run the worker
-7. `GET /jobs/{job_id}`
-
-Example software job body:
-
-```json
-{
-  "resume_id": 1,
-  "target_title": "Software Engineer",
-  "job_description": "We need a software engineer who can build reliable web services, work with databases, write clean tests, use cloud tools, collaborate with product teams, and explain engineering trade-offs clearly."
-}
+```bash
+OFFERPATH_RAG_EMBEDDER_MODE=fake .venv/bin/python scripts/evaluate_rag.py --json
 ```
 
-Successful jobs return a structured result with:
+The script reports actual Recall@1, Recall@3, Recall@5, MRR, Empty Retrieval Rate, Tenant Isolation Pass Rate, and Average Retrieval Latency. It does not hard-code success numbers.
 
-- `matched_skills`
-- prioritized `missing_skills`
-- `weak_skills`
-- `partially_matched_skills`
-- `evidence_from_resume`
-- `evidence_from_jd`
-- `30_day_roadmap`
-- `project_tasks`
-- `interview_talking_points`
-- `resume_improvement_suggestions`
+## Analysis Providers
 
-## Configuration
+Local deterministic tests:
 
-Local secrets belong in:
-
-```text
-backend/.env
-```
-
-Do not commit `.env`.
-
-AI provider:
-
-```env
+```bash
 OFFERPATH_AI_PROVIDER=mock
-OFFERPATH_GEMINI_MODEL=gemini-2.0-flash-lite
-# OFFERPATH_GEMINI_API_KEY=your-local-secret
-OFFERPATH_OPENAI_MODEL=gpt-4o-mini
-# OFFERPATH_OPENAI_API_KEY=your-local-secret
 ```
 
-Switch to Gemini:
+Gemini:
 
-```env
+```bash
 OFFERPATH_AI_PROVIDER=gemini
+OFFERPATH_GEMINI_MODEL=gemini-2.0-flash-lite
 OFFERPATH_GEMINI_API_KEY=your-local-secret
 ```
 
-Switch to OpenAI:
+OpenAI:
 
-```env
+```bash
 OFFERPATH_AI_PROVIDER=openai
 OFFERPATH_OPENAI_MODEL=gpt-4o-mini
 OFFERPATH_OPENAI_API_KEY=your-local-secret
 ```
 
-Storage:
+API keys belong in `backend/.env`. `.env.example` must contain placeholders only.
 
-```env
-STORAGE_BACKEND=local
-OFFERPATH_UPLOAD_DIR=./storage/resumes
+## Career Agent
+
+The bounded ReAct-style career agent lives under `backend/app/services/career_agent/`. It can read the resume/JD, reuse previous successful analysis context, revise a roadmap from user feedback, search GitHub reference projects through the MCP adapter, and draft Notion/Gmail outputs without publishing or sending by default.
+
+RAG V2 is integrated into the provider worker path. The career-agent MCP path is kept focused on agent actions and external-tool drafts.
+
+## Tests
+
+Run backend tests with a clean temporary SQLite database:
+
+```bash
+cd backend
+OFFERPATH_DATABASE_URL=sqlite:////private/tmp/offerpath-test.db \
+OFFERPATH_ENV=test \
+OFFERPATH_RAG_EMBEDDER_MODE=fake \
+.venv/bin/python -m pytest
 ```
 
-Future Bedrock KB RAG:
+Run frontend build:
 
-```env
-OFFERPATH_RAG_PROVIDER=bedrock_kb
-OFFERPATH_BEDROCK_KB_ID=your-kb-id
-OFFERPATH_BEDROCK_MODEL_ARN=your-model-arn
-OFFERPATH_AWS_REGION=ap-southeast-2
-OFFERPATH_RAG_SEARCH_TYPE=HYBRID
-OFFERPATH_RAG_NUMBER_OF_RESULTS=5
+```bash
+cd frontend
+npm run build
 ```
 
-## Reliability Features
+## Manual Swagger Check
 
-Redis is used for:
-
-- rate limiting
-- idempotency keys
-- live job status
-- worker locks
-
-The database remains the source of truth for:
-
-- users
-- resumes
-- jobs
-- results
-- intermediate steps
-
-## Project Principle
-
-OfferPath should not only help users look stronger on paper.
-
-It should help them become stronger in reality by turning career gaps into concrete learning tasks, proof projects, reference examples, and follow-up actions.
+1. Start API, open `http://localhost:8000/docs`, register/login, and authorize with the bearer token.
+2. Create a RAG text document through `POST /rag/documents/text`.
+3. Query `POST /rag/search` and confirm citations are returned.
+4. Upload a resume, create an analysis job, and run it.
+5. Confirm `GET /jobs/{id}` includes `intermediate_steps.rag_v2` and that another user cannot access the first user’s RAG document.

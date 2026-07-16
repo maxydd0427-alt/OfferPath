@@ -124,7 +124,14 @@ class AnalysisProvider(ABC):
     prompt_version: str
 
     @abstractmethod
-    def run(self, *, target_title: str, resume_text: str, job_description: str) -> AnalysisWorkflowOutput:
+    def run(
+        self,
+        *,
+        target_title: str,
+        resume_text: str,
+        job_description: str,
+        rag_context: str | None = None,
+    ) -> AnalysisWorkflowOutput:
         pass
 
 
@@ -152,7 +159,14 @@ class MockAnalysisProvider(AnalysisProvider):
     name = "mock"
     prompt_version = MOCK_PROMPT_VERSION
 
-    def run(self, *, target_title: str, resume_text: str, job_description: str) -> AnalysisWorkflowOutput:
+    def run(
+        self,
+        *,
+        target_title: str,
+        resume_text: str,
+        job_description: str,
+        rag_context: str | None = None,
+    ) -> AnalysisWorkflowOutput:
         resume_understanding = understand_resume(resume_text)
         jd_understanding = understand_job_description(job_description)
         skill_gap = compare_skill_gap(resume_understanding, jd_understanding)
@@ -184,6 +198,7 @@ class MockAnalysisProvider(AnalysisProvider):
                 "project_recommendation": {"item_count": len(result.project_tasks)},
                 "interview_preparation": {"question_count": len(result.interview_questions)},
                 "final_result_validation": {"validated_schema": "AnalysisResult"},
+                "rag_v2_context_available": bool(rag_context),
             },
             ai_provider=self.name,
             prompt_version=self.prompt_version,
@@ -194,12 +209,19 @@ class GeminiAnalysisProvider(AnalysisProvider):
     name = "gemini"
     prompt_version = GEMINI_PROMPT_VERSION
 
-    def run(self, *, target_title: str, resume_text: str, job_description: str) -> AnalysisWorkflowOutput:
+    def run(
+        self,
+        *,
+        target_title: str,
+        resume_text: str,
+        job_description: str,
+        rag_context: str | None = None,
+    ) -> AnalysisWorkflowOutput:
         settings = get_settings()
         if not settings.gemini_api_key:
             raise MissingAPIKeyError("missing API key: set OFFERPATH_GEMINI_API_KEY to use Gemini")
 
-        context: dict[str, Any] = {}
+        context: dict[str, Any] = {"retrieved_evidence_context": rag_context or ""}
         for step in [
             "resume_understanding",
             "jd_understanding",
@@ -215,7 +237,7 @@ class GeminiAnalysisProvider(AnalysisProvider):
                     step=step,
                     target_title=target_title,
                     resume_text=resume_text,
-                    job_description=job_description,
+                    job_description=_job_description_with_rag(job_description, rag_context),
                     context=context,
                 ),
                 step=step,
@@ -227,7 +249,7 @@ class GeminiAnalysisProvider(AnalysisProvider):
             prompt=build_gemini_validation_prompt(
                 target_title=target_title,
                 resume_text=resume_text,
-                job_description=job_description,
+                job_description=_job_description_with_rag(job_description, rag_context),
                 context=context,
             ),
         )
@@ -338,12 +360,19 @@ class OpenAIAnalysisProvider(AnalysisProvider):
     name = "openai"
     prompt_version = OPENAI_PROMPT_VERSION
 
-    def run(self, *, target_title: str, resume_text: str, job_description: str) -> AnalysisWorkflowOutput:
+    def run(
+        self,
+        *,
+        target_title: str,
+        resume_text: str,
+        job_description: str,
+        rag_context: str | None = None,
+    ) -> AnalysisWorkflowOutput:
         settings = get_settings()
         if not settings.openai_api_key:
             raise MissingAPIKeyError("missing API key: set OFFERPATH_OPENAI_API_KEY to use OpenAI")
 
-        context: dict[str, Any] = {}
+        context: dict[str, Any] = {"retrieved_evidence_context": rag_context or ""}
         for step in [
             "resume_understanding",
             "jd_understanding",
@@ -359,7 +388,7 @@ class OpenAIAnalysisProvider(AnalysisProvider):
                     step=step,
                     target_title=target_title,
                     resume_text=resume_text,
-                    job_description=job_description,
+                    job_description=_job_description_with_rag(job_description, rag_context),
                     context=context,
                 ),
                 step=step,
@@ -371,7 +400,7 @@ class OpenAIAnalysisProvider(AnalysisProvider):
             prompt=build_gemini_validation_prompt(
                 target_title=target_title,
                 resume_text=resume_text,
-                job_description=job_description,
+                job_description=_job_description_with_rag(job_description, rag_context),
                 context=context,
             ),
         )
@@ -497,6 +526,16 @@ def build_ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context(cafile=certifi.where())
 
 
+def _job_description_with_rag(job_description: str, rag_context: str | None) -> str:
+    if not rag_context:
+        return job_description
+    return (
+        f"{job_description}\n\n"
+        "Retrieved evidence context for citation-aware analysis:\n"
+        f"{rag_context}"
+    )
+
+
 def extract_skills(text: str) -> list[str]:
     normalized = text.lower()
     found = {skill for skill in SKILL_KEYWORDS if re.search(rf"\b{re.escape(skill)}\b", normalized)}
@@ -617,6 +656,17 @@ def run_analysis(db: Session, job_id: int) -> bool:
                 )
             except (RuntimeError, ValueError) as exc:
                 raise ResumeExtractionError(f"PDF text extraction failure: {exc}") from exc
+            rag_v2_payload: dict[str, Any] | None = None
+            rag_context: str | None = None
+            if settings.rag_v2_enabled:
+                set_job_status(
+                    job.id,
+                    status=job.status.value,
+                    step="retrieving_rag_v2_context",
+                    progress=50,
+                    message="Retrieving tenant-isolated evidence context.",
+                )
+                rag_v2_payload, rag_context = _retrieve_rag_v2_context(db, job)
             set_job_status(
                 job.id,
                 status=job.status.value,
@@ -628,7 +678,10 @@ def run_analysis(db: Session, job_id: int) -> bool:
                 target_title=job.target_title,
                 resume_text=resume_text,
                 job_description=job.job_description,
+                rag_context=rag_context,
             )
+            if rag_v2_payload is not None:
+                output.intermediate_steps["rag_v2"] = rag_v2_payload
         else:
             raise RuntimeError(f"Unsupported analysis workflow: {settings.analysis_workflow}")
 
@@ -708,15 +761,29 @@ def get_analysis_provider() -> AnalysisProvider:
 
 def run_career_agent_analysis(db: Session, job_id: int) -> AnalysisWorkflowOutput:
     from app.services.career_agent import run_career_agent_preview
-    from app.services.rag import BedrockKnowledgeBaseRetriever
 
-    settings = get_settings()
-    rag_retriever = BedrockKnowledgeBaseRetriever() if settings.bedrock_kb_id else None
-    return run_career_agent_preview(
-        db,
-        job_id,
-        rag_retriever=rag_retriever,
-    )
+    return run_career_agent_preview(db, job_id)
+
+
+def _retrieve_rag_v2_context(db: Session, job: AnalysisJob) -> tuple[dict[str, Any], str | None]:
+    try:
+        from app.rag_v2 import OfferPathRetriever
+
+        result = OfferPathRetriever().retrieve_for_analysis(
+            db,
+            owner_id=job.owner_id,
+            analysis_job_id=job.id,
+            target_title=job.target_title,
+            job_description=job.job_description,
+        )
+        payload = result.model_dump()
+        return payload, result.context or None
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error_message": str(exc)[:1000],
+            "citations": [],
+        }, None
 
 
 def _mark_job_failed(job: AnalysisJob, exc: Exception) -> None:

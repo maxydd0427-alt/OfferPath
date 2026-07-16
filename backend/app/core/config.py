@@ -43,26 +43,22 @@ class Settings(BaseSettings):
         default="resumes",
         validation_alias=AliasChoices("OFFERPATH_S3_RESUME_PREFIX", "S3_RESUME_PREFIX"),
     )
-    bedrock_kb_id: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("OFFERPATH_BEDROCK_KB_ID", "BEDROCK_KB_ID"),
-    )
-    bedrock_kb_search_type: str = Field(
-        default="HYBRID",
-        validation_alias=AliasChoices("OFFERPATH_BEDROCK_KB_SEARCH_TYPE", "BEDROCK_KB_SEARCH_TYPE"),
-    )
-    bedrock_kb_number_of_results: int = Field(
-        default=5,
-        validation_alias=AliasChoices("OFFERPATH_BEDROCK_KB_NUMBER_OF_RESULTS", "BEDROCK_KB_NUMBER_OF_RESULTS"),
-    )
-    rag_metrics_enabled: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("OFFERPATH_RAG_METRICS_ENABLED", "RAG_METRICS_ENABLED"),
-    )
-    rag_metrics_namespace: str = Field(
-        default="OfferPath/RAG",
-        validation_alias=AliasChoices("OFFERPATH_RAG_METRICS_NAMESPACE", "RAG_METRICS_NAMESPACE"),
-    )
+    rag_v2_enabled: bool = True
+    rag_embedding_model: str = "gemini-embedding-001"
+    rag_embedding_dimension: int = 768
+    rag_embedder_mode: str = Field(default="auto", validation_alias=AliasChoices("OFFERPATH_RAG_EMBEDDER_MODE", "RAG_EMBEDDER_MODE"))
+    rag_chunk_size_chars: int = 1400
+    rag_chunk_overlap_chars: int = 180
+    rag_minimum_chunk_chars: int = 120
+    rag_vector_limit: int = 20
+    rag_keyword_limit: int = 20
+    rag_hybrid_limit: int = 15
+    rag_final_limit: int = 6
+    rag_rrf_k: int = 60
+    rag_max_context_chars: int = 12000
+    rag_pipeline_version: str = "rag-v2"
+    rag_reranker_enabled: bool = True
+    rag_upload_max_bytes: int = 10485760
     aws_access_key_id: str | None = Field(
         default=None,
         validation_alias=AliasChoices("OFFERPATH_AWS_ACCESS_KEY_ID", "AWS_ACCESS_KEY_ID"),

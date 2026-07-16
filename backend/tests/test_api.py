@@ -229,7 +229,6 @@ def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
 def test_worker_can_run_career_agent_workflow(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OFFERPATH_ANALYSIS_WORKFLOW", "career_agent")
     monkeypatch.setenv("OFFERPATH_AGENT_PLANNER", "heuristic")
-    monkeypatch.delenv("OFFERPATH_BEDROCK_KB_ID", raising=False)
     get_settings.cache_clear()
     init_db()
     resume_file = tmp_path / "resume.txt"

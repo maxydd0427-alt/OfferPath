@@ -72,11 +72,6 @@ class HeuristicAgentPlanner:
                 thought="I should check previous successful analyses to avoid giving isolated advice.",
                 tool_name="get_recent_user_analysis_context_tool",
             )
-        if state["rag_runtime"] != "disabled" and not state["rag_context_loaded"]:
-            return ReActAction(
-                thought="RAG is available, so I should retrieve user-scoped career memory before building the roadmap.",
-                tool_name="retrieve_career_rag_context_tool",
-            )
         if "result" not in state:
             return ReActAction(
                 thought="I have enough internal and retrieved context to build a validated structured result.",
@@ -249,8 +244,6 @@ def _build_planner_prompt(
         "has_resume_text": bool(state["resume_text"]),
         "has_job_description": bool(state["job_description"]),
         "user_context_loaded": state["user_context_loaded"],
-        "rag_runtime": state["rag_runtime"],
-        "rag_context_loaded": state["rag_context_loaded"],
         "has_structured_result": "result" in state,
         "has_user_feedback": bool(state["user_feedback"]),
         "feedback_used": state["feedback_used"],
@@ -272,7 +265,7 @@ def _build_planner_prompt(
         "- Only choose a tool from the allowed_tools list.\n"
         "- Never invent tools.\n"
         "- Notion and Gmail tools are draft-only; never ask to publish or send.\n"
-        "- Prefer gathering resume, JD, prior context, and RAG context before building the result.\n"
+        "- Prefer gathering resume, JD, and prior context before building the result.\n"
         "- Build a structured result before GitHub, Notion, or Gmail actions.\n"
         "Return only JSON in this shape: {\"thought\": \"...\", \"action\": \"tool_name_or_finish\"}.\n\n"
         f"allowed_tools: {json.dumps(allowed_tools)}\n"

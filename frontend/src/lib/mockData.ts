@@ -83,12 +83,12 @@ export const demoJob: JobDetail = {
   },
   intermediate_steps: {
     planner: "llm_react_planner",
-    rag_runtime: "bedrock_kb",
+    rag_runtime: "rag_v2",
     mcp_runtime: "real_mcp_client",
     tool_calls: [
       { step: 1, action: "get_resume_text_tool", reason: "Need resume evidence." },
       { step: 2, action: "get_job_description_tool", reason: "Need role requirements." },
-      { step: 3, action: "retrieve_career_rag_context_tool", reason: "Use long-term career memory." },
+      { step: 3, action: "rag_v2_retrieval", reason: "Use tenant-isolated evidence citations." },
       { step: 4, action: "build_structured_result_tool", reason: "Create validated roadmap." },
       { step: 5, action: "github_mcp_search_reference_projects", reason: "Find reference projects." },
     ],

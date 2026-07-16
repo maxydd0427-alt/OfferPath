@@ -30,6 +30,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _apply_sqlite_dev_migrations()
+    _apply_postgres_rag_v2_migrations()
 
 
 def _apply_sqlite_dev_migrations() -> None:
@@ -63,6 +64,28 @@ def _apply_sqlite_dev_migrations() -> None:
             "prompt_version": "ALTER TABLE analysis_jobs ADD COLUMN prompt_version VARCHAR NOT NULL DEFAULT 'mock-v1'",
         },
     )
+
+
+def _apply_postgres_rag_v2_migrations() -> None:
+    if database_backend != "postgresql":
+        return
+    statements = [
+        "CREATE EXTENSION IF NOT EXISTS vector",
+        "ALTER TABLE rag_chunks ALTER COLUMN search_vector TYPE tsvector USING to_tsvector('simple', coalesce(content, ''))",
+        "UPDATE rag_chunks SET search_vector = to_tsvector('simple', coalesce(content, '')) WHERE search_vector IS NULL",
+        "CREATE INDEX IF NOT EXISTS ix_rag_chunks_search_vector ON rag_chunks USING GIN (search_vector)",
+        "CREATE INDEX IF NOT EXISTS ix_rag_documents_metadata ON rag_documents USING GIN (metadata_json)",
+        "CREATE INDEX IF NOT EXISTS ix_rag_chunks_metadata ON rag_chunks USING GIN (metadata_json)",
+        "CREATE INDEX IF NOT EXISTS ix_rag_chunks_embedding_hnsw ON rag_chunks USING hnsw (embedding vector_cosine_ops)",
+    ]
+    with engine.begin() as connection:
+        for statement in statements:
+            try:
+                connection.execute(text(statement))
+            except Exception:
+                # Alembic is the authoritative production migration path. This
+                # dev helper must not prevent app startup on partially migrated DBs.
+                continue
 
 
 def _apply_sqlite_column_migrations(

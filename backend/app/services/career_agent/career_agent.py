@@ -13,7 +13,6 @@ from app.services.career_agent.tools import (
 )
 from app.services.career_agent.structured_result_builder import build_structured_result_tool
 from app.services.analysis import AnalysisResult, AnalysisWorkflowOutput
-from app.services.rag import CareerContextRetriever, build_rag_tuning_report, retrieve_career_context_tool
 
 REACT_WORKFLOW_VERSION = "career-agent-react-v0"
 REACT_PROMPT_VERSION = "career-agent-mcp-v0"
@@ -26,7 +25,6 @@ def run_career_agent_preview(
     user_feedback: str | None = None,
     mcp_client: MCPToolClient | None = None,
     mcp_config: MCPAdapterConfig | None = None,
-    rag_retriever: CareerContextRetriever | None = None,
     planner: AgentPlanner | None = None,
 ) -> AnalysisWorkflowOutput:
     job = db.get(AnalysisJob, job_id)
@@ -40,10 +38,7 @@ def run_career_agent_preview(
         "job_description": "",
         "user_context": RecentAnalysisContext(),
         "user_context_loaded": False,
-        "rag_context": None,
-        "rag_context_loaded": False,
         "previous_context_used": False,
-        "rag_context_used": False,
         "user_feedback": (user_feedback or "").strip(),
         "feedback_used": False,
         "llm_payload": {
@@ -55,8 +50,6 @@ def run_career_agent_preview(
         "gmail_draft": None,
         "mcp_adapter": create_mcp_adapter(client=mcp_client, config=mcp_config),
         "mcp_runtime": "real_mcp_client" if mcp_client is not None else "deterministic_fallback",
-        "rag_retriever": rag_retriever,
-        "rag_runtime": "bedrock_kb" if rag_retriever is not None else "disabled",
     }
     active_planner = planner or create_agent_planner(allowed_tools=_available_tools())
     intermediate_steps: dict[str, Any] = {
@@ -65,13 +58,7 @@ def run_career_agent_preview(
         "planning_mode": "llm_driven" if active_planner.name == "llm_react_planner" else "dynamic_state_based",
         "max_steps": REACT_MAX_STEPS,
         "mcp_runtime": state["mcp_runtime"],
-        "rag_runtime": state["rag_runtime"],
         "available_tools": _available_tools(),
-        "rag_policy": {
-            "metadata_filter": "always filter by user_id",
-            "search_type": "HYBRID by default",
-            "metrics": "CloudWatch latency/item/error metrics when enabled",
-        },
         "external_mcp_policy": {
             "github": "read/search only in preview",
             "notion": "draft only; no publish without explicit user confirmation",
@@ -80,7 +67,6 @@ def run_career_agent_preview(
         "tool_calls": [],
         "observations": [],
         "previous_context_used": False,
-        "rag_context_used": False,
         "feedback_used": False,
         "writes_result_json": False,
     }
@@ -116,7 +102,6 @@ def run_career_agent_preview(
 
     result = _finalize_result(state)
     intermediate_steps["previous_context_used"] = state["previous_context_used"]
-    intermediate_steps["rag_context_used"] = state["rag_context_used"]
     intermediate_steps["feedback_used"] = state["feedback_used"]
     intermediate_steps["final_result_validation"] = {
         "validated_schema": "AnalysisResult",
@@ -137,7 +122,6 @@ def _available_tools() -> list[str]:
         "get_resume_text_tool",
         "get_job_description_tool",
         "get_recent_user_analysis_context_tool",
-        "retrieve_career_rag_context_tool",
         "build_structured_result_tool",
         "revise_roadmap_with_user_feedback_tool",
         "github_mcp_search_reference_projects",
@@ -172,29 +156,6 @@ def _execute_action(
             "previous_missing_skill_count": len(context.previous_missing_skills),
             "previous_roadmap_item_count": len(context.previous_roadmap_items),
             "previous_project_suggestion_count": len(context.previous_project_suggestions),
-        }
-    if action.tool_name == "retrieve_career_rag_context_tool":
-        rag_context = retrieve_career_context_tool(
-            db,
-            state["job_id"],
-            state["rag_retriever"],
-        )
-        state["rag_context"] = rag_context
-        state["rag_context_loaded"] = True
-        state["rag_context_used"] = rag_context.used
-        state["llm_payload"]["rag_context_items"] = [item.model_dump() for item in rag_context.items[:5]]
-        tuning_report = build_rag_tuning_report(rag_context)
-        state["rag_tuning_report"] = tuning_report
-        return {
-            "enabled": rag_context.enabled,
-            "used": rag_context.used,
-            "item_count": len(rag_context.items),
-            "search_type": rag_context.search_type,
-            "metadata_filter": rag_context.metadata_filter,
-            "latency_ms": rag_context.latency_ms,
-            "error": rag_context.error,
-            "tuning": tuning_report.model_dump(),
-            "sources": [item.source_uri for item in rag_context.items if item.source_uri],
         }
     if action.tool_name == "build_structured_result_tool":
         result = _finalize_result(state)
