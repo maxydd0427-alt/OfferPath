@@ -25,7 +25,7 @@ Resume + Target JD
 -> iterative improvement
 ```
 
-For roles such as AI SRE, backend engineer, cloud engineer, and AI agent engineer, OfferPath should answer:
+For computer science students and software job seekers, OfferPath should answer:
 
 - Which skills does this role require?
 - Which skills does the resume already prove?
@@ -36,6 +36,24 @@ For roles such as AI SRE, backend engineer, cloud engineer, and AI agent enginee
 - Which GitHub projects are useful references?
 - What should be saved as learning notes?
 - What progress update or outreach email should be drafted?
+
+## Frontend Demo
+
+OfferPath includes a lightweight Vite + React + TypeScript frontend demo under `frontend/`.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The backend should be running at `http://localhost:8000`. To use another API URL:
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+The frontend connects to the real FastAPI routes for auth, resume upload, job creation, polling, and result rendering. The “View Demo Result” button uses local mock data only as a presentation fallback.
 
 ## Current Architecture
 
@@ -135,7 +153,9 @@ To use the LLM planner locally:
 
 ```bash
 OFFERPATH_AGENT_PLANNER=llm
-OFFERPATH_GEMINI_API_KEY=your-local-key
+OFFERPATH_AI_PROVIDER=openai
+OFFERPATH_OPENAI_MODEL=gpt-4o-mini
+OFFERPATH_OPENAI_API_KEY=your-local-key
 ```
 
 The ReAct agent is the intended iterative product flow. It can:
@@ -424,13 +444,13 @@ pytest
 6. Run the worker
 7. `GET /jobs/{job_id}`
 
-Example AI SRE job body:
+Example software job body:
 
 ```json
 {
   "resume_id": 1,
-  "target_title": "AI SRE",
-  "job_description": "We need an AI SRE who can run production AI systems on AWS, build observability dashboards, debug incidents, operate Kubernetes workloads, design async queues, understand LLM workflows, write Python services, manage Redis/PostgreSQL, automate CI/CD, and explain reliability trade-offs."
+  "target_title": "Software Engineer",
+  "job_description": "We need a software engineer who can build reliable web services, work with databases, write clean tests, use cloud tools, collaborate with product teams, and explain engineering trade-offs clearly."
 }
 ```
 
@@ -461,8 +481,10 @@ AI provider:
 
 ```env
 OFFERPATH_AI_PROVIDER=mock
-OFFERPATH_GEMINI_MODEL=gemini-2.5-flash
+OFFERPATH_GEMINI_MODEL=gemini-2.0-flash-lite
 # OFFERPATH_GEMINI_API_KEY=your-local-secret
+OFFERPATH_OPENAI_MODEL=gpt-4o-mini
+# OFFERPATH_OPENAI_API_KEY=your-local-secret
 ```
 
 Switch to Gemini:
@@ -470,6 +492,14 @@ Switch to Gemini:
 ```env
 OFFERPATH_AI_PROVIDER=gemini
 OFFERPATH_GEMINI_API_KEY=your-local-secret
+```
+
+Switch to OpenAI:
+
+```env
+OFFERPATH_AI_PROVIDER=openai
+OFFERPATH_OPENAI_MODEL=gpt-4o-mini
+OFFERPATH_OPENAI_API_KEY=your-local-secret
 ```
 
 Storage:

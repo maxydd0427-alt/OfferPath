@@ -125,6 +125,55 @@ def test_offerpath_async_worker_flow(tmp_path: Path) -> None:
         assert all("priority" in item for item in payload["result"]["missing_skills"])
 
 
+def test_job_run_endpoint_processes_queued_job(tmp_path: Path) -> None:
+    email = f"run-now-{uuid4().hex}@example.com"
+    with TestClient(app) as client:
+        response = client.post(
+            "/auth/register",
+            json={"email": email, "password": "strong-password"},
+        )
+        assert response.status_code == 201
+        response = client.post(
+            "/auth/login",
+            data={"username": email, "password": "strong-password"},
+        )
+        token = response.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        resume = tmp_path / "resume.txt"
+        resume.write_text("Python FastAPI SQL Docker testing", encoding="utf-8")
+        with resume.open("rb") as file:
+            response = client.post(
+                "/resumes",
+                headers=headers,
+                files={"file": ("resume.txt", file, "text/plain")},
+            )
+        assert response.status_code == 201
+        resume_id = response.json()["id"]
+
+        response = client.post(
+            "/jobs",
+            headers=headers,
+            json={
+                "resume_id": resume_id,
+                "target_title": "Software Engineer",
+                "job_description": "We need Python, FastAPI, PostgreSQL, Redis, AWS, S3, Docker, testing, and REST APIs.",
+            },
+        )
+        assert response.status_code == 201
+        job_id = response.json()["id"]
+
+        response = client.post(f"/jobs/{job_id}/run", headers=headers)
+        assert response.status_code == 200
+
+        response = client.get(f"/jobs/{job_id}", headers=headers)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "succeeded"
+        assert payload["result"] is not None
+        assert payload["intermediate_steps"] is not None
+
+
 def test_worker_processes_next_queued_job(tmp_path: Path) -> None:
     init_db()
     resume_file = tmp_path / "resume.txt"
@@ -231,4 +280,57 @@ def test_worker_can_run_career_agent_workflow(tmp_path: Path, monkeypatch) -> No
     finally:
         db.close()
         monkeypatch.setenv("OFFERPATH_ANALYSIS_WORKFLOW", "provider")
+        get_settings.cache_clear()
+
+
+def test_worker_reads_resume_using_recorded_storage_backend(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OFFERPATH_ANALYSIS_WORKFLOW", "provider")
+    monkeypatch.setenv("OFFERPATH_STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("S3_BUCKET_NAME", "unused-test-bucket")
+    get_settings.cache_clear()
+    init_db()
+    resume_file = tmp_path / "resume.txt"
+    resume_file.write_text("Python FastAPI Docker testing", encoding="utf-8")
+
+    db = SessionLocal()
+    try:
+        user = User(email=f"mixed-storage-{uuid4().hex}@example.com", hashed_password="not-used")
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        resume = Resume(
+            owner_id=user.id,
+            original_filename="resume.txt",
+            stored_path=str(resume_file),
+            storage_backend="local",
+            content_type="text/plain",
+            file_size=resume_file.stat().st_size,
+        )
+        db.add(resume)
+        db.commit()
+        db.refresh(resume)
+
+        job = AnalysisJob(
+            owner_id=user.id,
+            resume_id=resume.id,
+            target_title="Software Engineer",
+            job_description="Python FastAPI PostgreSQL Redis AWS S3 Docker testing REST APIs",
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        processed_job_id = process_next_queued_job(db)
+
+        db.refresh(job)
+        assert processed_job_id == job.id
+        assert job.status == JobStatus.succeeded
+        assert job.last_error is None
+        assert job.result_json is not None
+    finally:
+        db.close()
+        monkeypatch.setenv("OFFERPATH_STORAGE_BACKEND", "local")
+        monkeypatch.setenv("STORAGE_BACKEND", "local")
         get_settings.cache_clear()

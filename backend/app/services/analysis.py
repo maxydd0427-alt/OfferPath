@@ -26,6 +26,7 @@ logger = get_logger(__name__)
 WORKFLOW_VERSION = "agentic-v1"
 MOCK_PROMPT_VERSION = "mock-v1"
 GEMINI_PROMPT_VERSION = "gemini-v1"
+OPENAI_PROMPT_VERSION = "openai-v1"
 GEMINI_JSON_RETRIES = 2
 
 SKILL_KEYWORDS = {
@@ -333,6 +334,161 @@ class GeminiAnalysisProvider(AnalysisProvider):
         return json.loads(text)
 
 
+class OpenAIAnalysisProvider(AnalysisProvider):
+    name = "openai"
+    prompt_version = OPENAI_PROMPT_VERSION
+
+    def run(self, *, target_title: str, resume_text: str, job_description: str) -> AnalysisWorkflowOutput:
+        settings = get_settings()
+        if not settings.openai_api_key:
+            raise MissingAPIKeyError("missing API key: set OFFERPATH_OPENAI_API_KEY to use OpenAI")
+
+        context: dict[str, Any] = {}
+        for step in [
+            "resume_understanding",
+            "jd_understanding",
+            "skill_gap_comparison",
+            "roadmap_generation",
+            "project_recommendation",
+            "interview_preparation",
+        ]:
+            context[step] = self._generate_json_with_retry(
+                api_key=settings.openai_api_key,
+                model=settings.openai_model,
+                prompt=build_gemini_step_prompt(
+                    step=step,
+                    target_title=target_title,
+                    resume_text=resume_text,
+                    job_description=job_description,
+                    context=context,
+                ),
+                step=step,
+            )
+
+        result, raw_payload = self._generate_valid_result_with_retry(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            prompt=build_gemini_validation_prompt(
+                target_title=target_title,
+                resume_text=resume_text,
+                job_description=job_description,
+                context=context,
+            ),
+        )
+        context["final_result_validation"] = {
+            "validated_schema": "AnalysisResult",
+            "missing_skill_count": len(result.missing_skills),
+            "project_task_count": len(result.project_tasks),
+            "raw_keys": sorted(raw_payload.keys()),
+        }
+        return AnalysisWorkflowOutput(
+            result=result,
+            intermediate_steps={
+                "provider": self.name,
+                "model": settings.openai_model,
+                **context,
+            },
+            ai_provider=self.name,
+            prompt_version=self.prompt_version,
+        )
+
+    def _generate_json_with_retry(self, *, api_key: str, model: str, prompt: str, step: str) -> dict[str, Any]:
+        last_error: Exception | None = None
+        retry_prompt = prompt
+        for attempt in range(1, GEMINI_JSON_RETRIES + 2):
+            try:
+                return self._generate_json(api_key=api_key, model=model, prompt=retry_prompt)
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                retry_prompt = (
+                    f"{prompt}\n\nYour previous response was invalid JSON for step {step}. "
+                    "Return only parseable JSON with double-quoted property names."
+                )
+            except InvalidAIJSONError as exc:
+                last_error = exc
+                retry_prompt = (
+                    f"{prompt}\n\nYour previous response did not include valid JSON for step {step}. "
+                    "Return only the JSON object requested by the schema."
+                )
+            except LLMRequestError:
+                raise
+        raise InvalidAIJSONError(f"invalid JSON from OpenAI step {step}: {last_error}") from last_error
+
+    def _generate_valid_result_with_retry(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        prompt: str,
+    ) -> tuple[AnalysisResult, dict[str, Any]]:
+        last_error: Exception | None = None
+        retry_prompt = prompt
+        for attempt in range(1, GEMINI_JSON_RETRIES + 2):
+            raw_payload = self._generate_json_with_retry(
+                api_key=api_key,
+                model=model,
+                prompt=retry_prompt,
+                step="final_result_validation",
+            )
+            try:
+                return AnalysisResult.model_validate(raw_payload), raw_payload
+            except ValidationError as exc:
+                last_error = exc
+                retry_prompt = (
+                    f"{prompt}\n\nYour previous JSON failed schema validation: {exc}. "
+                    "Return the complete final object with all required fields and correct types."
+                )
+        raise AISchemaValidationError(f"schema validation failure in final_result_validation: {last_error}") from last_error
+
+    def _generate_json(self, *, api_key: str, model: str, prompt: str) -> dict[str, Any]:
+        request_body = {
+            "model": model,
+            "input": prompt,
+            "text": {"format": {"type": "json_object"}},
+        }
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(request_body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=60, context=build_ssl_context()) as response:
+                response_body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise LLMRequestError(
+                f"LLM request failure: OpenAI request failed with HTTP {exc.code}: {body}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise LLMRequestError(f"LLM request failure: OpenAI request failed: {exc}") from exc
+
+        text = _extract_openai_response_text(response_body)
+        if not text:
+            raise InvalidAIJSONError("invalid JSON: OpenAI response did not include JSON text")
+        return json.loads(text)
+
+
+def _extract_openai_response_text(response_body: dict[str, Any]) -> str | None:
+    output_text = response_body.get("output_text")
+    if isinstance(output_text, str):
+        return output_text
+    for item in response_body.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content", []):
+            if not isinstance(content, dict):
+                continue
+            text = content.get("text")
+            if isinstance(text, str):
+                return text
+    return None
+
+
 def build_ssl_context() -> ssl.SSLContext:
     try:
         import certifi
@@ -444,7 +600,7 @@ def run_analysis(db: Session, job_id: int) -> bool:
                 progress=20,
                 message="Reading resume bytes from storage.",
             )
-            storage = get_storage_service()
+            storage = get_storage_service(job.resume.storage_backend)
             file_bytes = storage.read_file(job.resume.stored_path)
             set_job_status(
                 job.id,
@@ -541,6 +697,8 @@ def parse_result(job: AnalysisJob, field: str = "result_json") -> dict | None:
 def get_analysis_provider() -> AnalysisProvider:
     settings = get_settings()
     provider_name = settings.ai_provider.lower()
+    if provider_name == "openai":
+        return OpenAIAnalysisProvider()
     if provider_name == "gemini":
         return GeminiAnalysisProvider()
     if provider_name == "mock":

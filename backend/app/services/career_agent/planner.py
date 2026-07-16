@@ -116,7 +116,7 @@ class LLMReActPlanner:
         client: PlannerLLMClient | None = None,
         allowed_tools: list[str] | None = None,
     ) -> None:
-        self.client = client or GeminiPlannerClient()
+        self.client = client or create_default_planner_client()
         self.allowed_tools = allowed_tools or []
 
     def choose_next_action(
@@ -183,6 +183,41 @@ class GeminiPlannerClient:
         return json.loads(text)
 
 
+class OpenAIPlannerClient:
+    def generate_decision(self, prompt: str) -> dict[str, Any]:
+        settings = get_settings()
+        if not settings.openai_api_key:
+            raise PlannerConfigurationError("missing API key: set OFFERPATH_OPENAI_API_KEY to use the LLM planner")
+
+        request_body = {
+            "model": settings.openai_model,
+            "input": prompt,
+            "text": {"format": {"type": "json_object"}},
+        }
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(request_body).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30, context=_ssl_context()) as response:
+                response_body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise PlannerDecisionError(f"LLM planner request failed with HTTP {exc.code}: {body}") from exc
+        except urllib.error.URLError as exc:
+            raise PlannerDecisionError(f"LLM planner request failed: {exc}") from exc
+
+        text = _extract_openai_response_text(response_body)
+        if not isinstance(text, str) or not text.strip():
+            raise PlannerDecisionError("LLM planner response did not include JSON text")
+        return json.loads(text)
+
+
 def create_agent_planner(
     *,
     allowed_tools: list[str],
@@ -194,6 +229,13 @@ def create_agent_planner(
     if planner_name == "heuristic":
         return HeuristicAgentPlanner()
     raise PlannerConfigurationError(f"Unsupported agent planner: {get_settings().agent_planner}")
+
+
+def create_default_planner_client() -> PlannerLLMClient:
+    provider_name = get_settings().ai_provider.lower()
+    if provider_name == "openai":
+        return OpenAIPlannerClient()
+    return GeminiPlannerClient()
 
 
 def _build_planner_prompt(
@@ -237,6 +279,22 @@ def _build_planner_prompt(
         f"state: {json.dumps(safe_state)}\n"
         f"recent_observations: {json.dumps(recent_observations)}\n"
     )
+
+
+def _extract_openai_response_text(response_body: dict[str, Any]) -> str | None:
+    output_text = response_body.get("output_text")
+    if isinstance(output_text, str):
+        return output_text
+    for item in response_body.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content", []):
+            if not isinstance(content, dict):
+                continue
+            text = content.get("text")
+            if isinstance(text, str):
+                return text
+    return None
 
 
 def _ssl_context() -> ssl.SSLContext:

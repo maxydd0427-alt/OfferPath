@@ -1,15 +1,15 @@
 import logging
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.logging import get_logger, log_event
-from app.db import get_db
-from app.models import AnalysisJob, Resume, User
+from app.db import SessionLocal, get_db
+from app.models import AnalysisJob, JobStatus, Resume, User
 from app.schemas import JobCreate, JobDetail, JobRead
-from app.services.analysis import parse_result
+from app.services.analysis import parse_result, run_analysis
 from app.services.idempotency import get_idempotent_job_id, set_idempotent_job_id
 from app.services.job_status_cache import get_job_status, set_job_status
 from app.services.queue import enqueue_analysis_job
@@ -92,6 +92,52 @@ def list_jobs(
     return list(db.scalars(select(AnalysisJob).where(AnalysisJob.owner_id == current_user.id)))
 
 
+@router.post("/{job_id}/run", response_model=JobRead)
+def run_job_now(
+    job_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> AnalysisJob:
+    job = db.scalar(
+        select(AnalysisJob).where(
+            AnalysisJob.id == job_id,
+            AnalysisJob.owner_id == current_user.id,
+        )
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status == JobStatus.succeeded:
+        return job
+    if job.status == JobStatus.processing:
+        return job
+    if job.status not in {JobStatus.queued, JobStatus.failed}:
+        raise HTTPException(status_code=409, detail=f"Job cannot be started from status {job.status.value}")
+
+    job.status = JobStatus.queued
+    job.error_message = None
+    job.last_error = None
+    db.commit()
+    db.refresh(job)
+    set_job_status(
+        job.id,
+        status=job.status.value,
+        step="start_requested",
+        progress=2,
+        message="Analysis start requested.",
+    )
+    background_tasks.add_task(_run_analysis_background, job.id)
+    log_event(
+        logger,
+        logging.INFO,
+        "analysis_job.start_requested",
+        job_id=job.id,
+        user_id=current_user.id,
+        status=job.status.value,
+    )
+    return job
+
+
 @router.get("/{job_id}", response_model=JobDetail)
 def get_job(
     job_id: int,
@@ -127,3 +173,11 @@ def get_job(
         error_message=job.error_message,
         last_error=job.last_error,
     )
+
+
+def _run_analysis_background(job_id: int) -> None:
+    db = SessionLocal()
+    try:
+        run_analysis(db, job_id)
+    finally:
+        db.close()

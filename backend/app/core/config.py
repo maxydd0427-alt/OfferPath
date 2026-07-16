@@ -23,7 +23,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OFFERPATH_AGENT_PLANNER", "AGENT_PLANNER"),
     )
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-2.0-flash-lite"
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174"
     storage_backend: str = Field(
         default="s3",

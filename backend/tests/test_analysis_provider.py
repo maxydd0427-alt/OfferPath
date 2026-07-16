@@ -2,7 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import get_settings
-from app.services.analysis import AnalysisResult, GeminiAnalysisProvider, MissingAPIKeyError, MockAnalysisProvider
+from app.services.analysis import (
+    AnalysisResult,
+    GeminiAnalysisProvider,
+    MissingAPIKeyError,
+    MockAnalysisProvider,
+    OpenAIAnalysisProvider,
+)
 
 
 def test_mock_provider_returns_extended_schema() -> None:
@@ -35,6 +41,21 @@ def test_gemini_provider_raises_clear_error_when_api_key_missing(monkeypatch: py
 
     with pytest.raises(MissingAPIKeyError, match="OFFERPATH_GEMINI_API_KEY"):
         GeminiAnalysisProvider().run(
+            target_title="Backend Engineer",
+            resume_text="Python FastAPI",
+            job_description="We need Python, FastAPI, Redis, AWS, Docker, testing, and REST APIs.",
+        )
+
+    get_settings.cache_clear()
+
+
+def test_openai_provider_raises_clear_error_when_api_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OFFERPATH_AI_PROVIDER", "openai")
+    monkeypatch.setenv("OFFERPATH_OPENAI_API_KEY", "")
+    get_settings.cache_clear()
+
+    with pytest.raises(MissingAPIKeyError, match="OFFERPATH_OPENAI_API_KEY"):
+        OpenAIAnalysisProvider().run(
             target_title="Backend Engineer",
             resume_text="Python FastAPI",
             job_description="We need Python, FastAPI, Redis, AWS, Docker, testing, and REST APIs.",

@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f8fb;
+  color: #17212b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(19, 111, 99, 0.16), transparent 34rem),
+    radial-gradient(circle at top right, rgba(226, 95, 77, 0.12), transparent 28rem),
+    linear-gradient(180deg, #fbfcff 0%, #f4f7fb 55%, #eef3f6 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  letter-spacing: 0;
+}
+
+::selection {
+  background: rgba(19, 111, 99, 0.18);
+}
+
+@layer components {
+  .card {
+    @apply rounded-[8px] border border-white/80 bg-white/80 shadow-card backdrop-blur;
+  }
+
+  .field {
+    @apply w-full rounded-[8px] border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-pine focus:ring-4 focus:ring-pine/10;
+  }
+
+  .label {
+    @apply grid gap-2 text-sm font-semibold text-slate-600;
+  }
+
+  .primary-button {
+    @apply inline-flex min-h-10 items-center justify-center rounded-[8px] bg-pine px-4 py-2 text-sm font-extrabold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-lg disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .secondary-button {
+    @apply inline-flex min-h-10 items-center justify-center rounded-[8px] border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-pine/30 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}

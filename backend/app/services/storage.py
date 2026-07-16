@@ -109,14 +109,14 @@ class LocalStorageService:
         return f"{user_id}/{uuid4().hex}_{safe_filename}"
 
 
-def get_storage_service() -> StorageService:
+def get_storage_service(backend_name: str | None = None) -> StorageService:
     settings = get_settings()
-    backend = settings.storage_backend.lower()
+    backend = (backend_name or settings.storage_backend).lower()
     if backend == "s3":
         return S3StorageService()
     if backend == "local":
         return LocalStorageService()
-    raise RuntimeError(f"Unsupported storage backend: {settings.storage_backend}")
+    raise RuntimeError(f"Unsupported storage backend: {backend}")
 
 
 def save_resume_file(upload: UploadFile, owner_id: int) -> str:

@@ -19,7 +19,7 @@ class RecentAnalysisContext(BaseModel):
 
 def get_resume_text_tool(db: Session, job_id: int) -> str:
     job = _get_job(db, job_id)
-    storage = get_storage_service()
+    storage = get_storage_service(job.resume.storage_backend)
     file_bytes = storage.read_file(job.resume.stored_path)
     return extract_resume_text(
         file_bytes=file_bytes,
